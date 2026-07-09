@@ -187,7 +187,7 @@ export default function CardioLab() {
   const [clinicalTime, setClinicalTime] = useState(0);
   const [timeSpeed, setTimeSpeed] = useState(1);
   const [paused, setPaused] = useState(false);
-  const [autoRotate, setAutoRotate] = useState(true);
+  const [autoRotate, setAutoRotate] = useState(false);
   const [compareHealthy, setCompareHealthy] = useState(false);
   const [lessonTab, setLessonTab] = useState<LessonTab>("heart");
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -255,7 +255,7 @@ export default function CardioLab() {
     setClinicalTime(0);
     setTimeSpeed(1);
     setPaused(false);
-    setAutoRotate(!reducedMotion);
+    setAutoRotate(false);
     setCompareHealthy(false);
     setLessonTab("heart");
   };
