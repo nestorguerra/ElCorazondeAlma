@@ -28,12 +28,18 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
 import { EcgMonitor } from "./EcgMonitor";
 import { HeartScene } from "./HeartScene";
+import {
+  createHeartMotionTelemetry,
+  type CardiacStage,
+  type HeartMotionTelemetry,
+} from "./heartMotion";
 import {
   DEFAULT_VITALS,
   DISEASES,
@@ -174,6 +180,78 @@ function severityLabel(value: number) {
   return "severa";
 }
 
+const MOTION_FOCUS: Record<DiseaseId, string> = {
+  afib: "Aurículas: temblor irregular",
+  vt: "Ventrículos: contracción rápida y descoordinada",
+  "av-block": "Algunos impulsos no activan los ventrículos",
+  ischemia: "Pared anterior: contracción debilitada",
+  infarction: "Territorio anterior y apical: movimiento muy reducido",
+  "heart-failure": "Ventrículo izquierdo: contracción global débil",
+  "aortic-stenosis": "Ventrículo izquierdo: eyección contra resistencia",
+  "mitral-regurgitation": "Válvula mitral: flujo retrógrado en sístole",
+  pericarditis: "Pericardio: expansión más restringida",
+  hcm: "Septo: engrosamiento y cavidad reducida",
+};
+
+const STAGE_LABELS: Record<CardiacStage, string> = {
+  atria: "Aurículas",
+  ventricles: "Ventrículos",
+  filling: "Llenado",
+};
+
+function CardiacMotionGuide({
+  telemetry,
+  disease,
+  paused,
+  reducedMotion,
+}: {
+  telemetry: HeartMotionTelemetry;
+  disease: Disease;
+  paused: boolean;
+  reducedMotion: boolean;
+}) {
+  const [stage, setStage] = useState<CardiacStage>(telemetry.stage);
+  const lastStage = useRef<CardiacStage>(telemetry.stage);
+
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      if (telemetry.stage !== lastStage.current) {
+        lastStage.current = telemetry.stage;
+        setStage(telemetry.stage);
+      }
+      frame = window.requestAnimationFrame(update);
+    };
+    frame = window.requestAnimationFrame(update);
+    return () => window.cancelAnimationFrame(frame);
+  }, [telemetry]);
+
+  const movementPaused = paused || reducedMotion;
+
+  return (
+    <div
+      className={`heart-motion-guide ${movementPaused ? "paused" : ""}`}
+      style={{ "--motion-color": disease.color } as CSSProperties}
+      data-motion-stage={movementPaused ? "paused" : stage}
+      aria-label={`Ciclo cardíaco. ${MOTION_FOCUS[disease.id]}`}
+    >
+      <span className="motion-guide-kicker">Ciclo cardíaco</span>
+      <div className="motion-stage-row" aria-hidden="true">
+        {(Object.keys(STAGE_LABELS) as CardiacStage[]).map((key) => (
+          <span
+            key={key}
+            className={`motion-stage ${!movementPaused && stage === key ? "active" : ""}`}
+          >
+            <i />
+            {STAGE_LABELS[key]}
+          </span>
+        ))}
+      </div>
+      <strong>{movementPaused ? "Movimiento pausado" : MOTION_FOCUS[disease.id]}</strong>
+    </div>
+  );
+}
+
 function formatClinicalTime(value: number, unit: Disease["timeUnit"]) {
   if (value < 0.05) return `0 ${unit}`;
   const decimals = value < 10 ? 1 : 0;
@@ -196,6 +274,7 @@ export default function CardioLab() {
   const [lessonTab, setLessonTab] = useState<LessonTab>("heart");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const motionTelemetry = useMemo(() => createHeartMotionTelemetry(), []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -476,6 +555,14 @@ export default function CardioLab() {
               simulation={simulation}
               paused={paused}
               autoRotate={autoRotate}
+              reducedMotion={reducedMotion}
+              motionTelemetry={motionTelemetry}
+            />
+
+            <CardiacMotionGuide
+              telemetry={motionTelemetry}
+              disease={disease}
+              paused={paused}
               reducedMotion={reducedMotion}
             />
 

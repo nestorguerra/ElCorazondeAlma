@@ -1,0 +1,111 @@
+import type { DiseaseId } from "./simulation";
+
+export type CardiacStage = "atria" | "ventricles" | "filling";
+
+export type HeartMotionTelemetry = {
+  phase: number;
+  atrial: number;
+  ventricular: number;
+  filling: number;
+  skipped: boolean;
+  stage: CardiacStage;
+};
+
+type MotionInput = {
+  phase: number;
+  beatIndex: number;
+  diseaseId: DiseaseId;
+  severity: number;
+  contractility: number;
+};
+
+export type CardiacMotion = HeartMotionTelemetry & {
+  atrialFlutter: number;
+  dyssynchrony: number;
+  regionalDysfunction: number;
+  twist: number;
+};
+
+const clamp = (value: number, min = 0, max = 1) =>
+  Math.min(max, Math.max(min, value));
+
+const smoothStep = (start: number, end: number, value: number) => {
+  const progress = clamp((value - start) / (end - start));
+  return progress * progress * (3 - 2 * progress);
+};
+
+const cyclicPulse = (phase: number, center: number, halfWidth: number) => {
+  const wrappedDistance = Math.abs(
+    ((((phase - center) % 1) + 1.5) % 1) - 0.5,
+  );
+  return smoothStep(0, 1, 1 - wrappedDistance / halfWidth);
+};
+
+export const createHeartMotionTelemetry = (): HeartMotionTelemetry => ({
+  phase: 0,
+  atrial: 0,
+  ventricular: 0,
+  filling: 1,
+  skipped: false,
+  stage: "filling",
+});
+
+export function computeCardiacMotion({
+  phase,
+  beatIndex,
+  diseaseId,
+  severity,
+  contractility,
+}: MotionInput): CardiacMotion {
+  const normalizedPhase = ((phase % 1) + 1) % 1;
+  const normalizedSeverity = clamp(severity);
+
+  const skipped =
+    diseaseId === "av-block" &&
+    beatIndex % (normalizedSeverity > 0.68 ? 3 : 2) !== 0;
+
+  const ventricularRise = smoothStep(0.025, 0.13, normalizedPhase);
+  const ventricularRelaxation =
+    1 - smoothStep(0.42, 0.64, normalizedPhase);
+  const coordinatedVentricular = ventricularRise * ventricularRelaxation;
+  const ventricular = skipped ? 0 : coordinatedVentricular;
+
+  const coordinatedAtrial = Math.pow(
+    cyclicPulse(normalizedPhase, 0.86, 0.145),
+    1.22,
+  );
+  const atrial =
+    diseaseId === "afib"
+      ? coordinatedAtrial * (1 - normalizedSeverity * 0.88)
+      : coordinatedAtrial;
+
+  const filling = clamp(1 - Math.max(ventricular, atrial) * 0.92);
+  const stage: CardiacStage =
+    atrial > 0.24
+      ? "atria"
+      : ventricular > 0.16
+        ? "ventricles"
+        : "filling";
+
+  return {
+    phase: normalizedPhase,
+    atrial,
+    ventricular,
+    filling,
+    skipped,
+    stage,
+    atrialFlutter:
+      diseaseId === "afib" ? 0.24 + normalizedSeverity * 0.76 : 0,
+    dyssynchrony:
+      diseaseId === "vt" ? 0.18 + normalizedSeverity * 0.82 : 0,
+    regionalDysfunction:
+      diseaseId === "infarction"
+        ? 0.42 + normalizedSeverity * 0.55
+        : diseaseId === "ischemia"
+          ? 0.18 + normalizedSeverity * 0.58
+          : 0,
+    twist:
+      (0.045 + clamp(contractility, 0.18, 1.08) * 0.095) *
+      (diseaseId === "hcm" ? 1.16 : 1),
+  };
+}
