@@ -1,3 +1,15 @@
+type AvBlockStage = 1 | 2 | 3 | 4;
+
+const AV_BLOCK_LABELS: Record<AvBlockStage, string> = {
+  1: "1.º grado",
+  2: "Mobitz I · Wenckebach",
+  3: "Mobitz II",
+  4: "Bloqueo AV completo",
+};
+
+const toAvBlockStage = (value: number) =>
+  Math.min(4, Math.max(1, Math.round(value))) as AvBlockStage;
+
 export type DiseaseId =
   | "afib"
   | "vt"
@@ -78,6 +90,7 @@ export type DerivedSimulation = {
   severity: number;
   heartRate: number;
   atrialRate: number;
+  avBlockStage: AvBlockStage;
   map: number;
   currentSystolic: number;
   currentDiastolic: number;
@@ -182,28 +195,28 @@ export const DISEASES: Disease[] = [
     regionLabel: "nodo AV y sistema de conducción",
     pattern: "av-block",
     summary:
-      "La señal auricular se retrasa o deja de llegar correctamente a los ventrículos.",
+      "La conducción entre aurículas y ventrículos se retrasa o se interrumpe con un patrón definido por el grado de bloqueo.",
     heartLesson:
-      "Compara el ritmo auricular con el ventricular: algunas activaciones no producen contracción ventricular.",
+      "Sigue el impulso desde las aurículas: puede retrasarse, detenerse en el nodo AV o coexistir con un escape ventricular independiente.",
     ecgLesson:
-      "Sigue cada onda P y comprueba si aparece el QRS que debería seguirla.",
+      "Compara cada onda P con su QRS: PR largo en primer grado, PR progresivo en Mobitz I, PR constante con fallos en Mobitz II y disociación en bloqueo completo.",
     causalLesson:
-      "Al perder latidos conducidos, la frecuencia ventricular y el gasto pueden caer aunque las aurículas sigan activas.",
+      "Las aurículas conservan su ritmo. Cuando falla la conducción, disminuyen los latidos ventriculares; en el bloqueo completo, un foco de escape lento mantiene la contracción ventricular.",
     caveat:
-      "El control continuo resume varios grados de bloqueo; no sustituye su clasificación electrocardiográfica real.",
-    rhythmLabel: "Conducción intermitente",
-    qrsLabel: "QRS omitidos",
+      "Los cuatro estados son patrones didácticos separados. Mobitz II y el bloqueo completo requieren valoración urgente y suelen indicar estimulación permanente si no hay causa reversible.",
+    rhythmLabel: "Patrón AV según grado",
+    qrsLabel: "Dependiente del nivel",
     stLabel: "Sin patrón específico",
-    mechanicalLoss: 0.34,
+    mechanicalLoss: 0,
     progressionRate: 0.12,
     timeUnit: "min",
     specific: {
-      label: "Impulsos no conducidos",
-      min: 10,
-      max: 80,
+      label: "Tipo de bloqueo AV",
+      min: 1,
+      max: 4,
       step: 1,
-      defaultValue: 36,
-      unit: "%",
+      defaultValue: 3,
+      unit: "",
     },
   },
   {
@@ -465,8 +478,11 @@ export function normaliseSpecific(disease: Disease, value: number) {
 }
 
 export function formatSpecific(disease: Disease, value: number) {
+  if (disease.id === "av-block") {
+    return AV_BLOCK_LABELS[toAvBlockStage(value)];
+  }
   const decimals = disease.specific.step < 1 ? 1 : 0;
-  return `${value.toFixed(decimals)} ${disease.specific.unit}`;
+  return `${value.toFixed(decimals)} ${disease.specific.unit}`.trim();
 }
 
 export function deriveSimulation(
@@ -509,6 +525,9 @@ export function deriveSimulation(
   const progression = clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
   const severity01 = severity / 100;
+  const avBlockStage = toAvBlockStage(
+    disease.id === "av-block" ? specificValue : 1,
+  );
 
   const feverRate = Math.max(0, vitals.temperature - 37) * 7;
   const hypoxiaRate = Math.max(0, 94 - vitals.spo2) * 0.9;
@@ -524,7 +543,14 @@ export function deriveSimulation(
   } else if (disease.id === "vt") {
     heartRate = specificValue;
   } else if (disease.id === "av-block") {
-    heartRate = Math.max(28, heartRate * (1 - 0.58 * severity01));
+    heartRate =
+      avBlockStage === 1
+        ? atrialRate
+        : avBlockStage === 2
+          ? atrialRate * 0.75
+          : avBlockStage === 3
+            ? atrialRate * (2 / 3)
+            : clamp(46 - severity01 * 15, 28, 45);
   }
   heartRate = clamp(Math.round(heartRate), 28, 220);
 
@@ -538,6 +564,9 @@ export function deriveSimulation(
     // The myocardium may retain intrinsic force; acute pump loss comes mainly
     // from rapid filling, abnormal activation and mechanical dyssynchrony.
     contractility = clamp(1 - severity01 * 0.18, 0.72, 1);
+  }
+  if (disease.id === "av-block") {
+    contractility = avBlockStage === 4 ? 0.88 : 1;
   }
   if (disease.id === "hcm") {
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
@@ -563,7 +592,9 @@ export function deriveSimulation(
       : disease.id === "vt"
         ? 1 - severity01 * 0.22
         : disease.id === "av-block"
-          ? 1 - severity01 * 0.08
+          ? avBlockStage === 4
+            ? 0.92
+            : 0.98
           : 1;
   const valvePenalty =
     disease.id === "aortic-stenosis"
@@ -601,6 +632,13 @@ export function deriveSimulation(
       62,
     );
   }
+  if (disease.id === "av-block") {
+    ejectionFraction = clamp(
+      64 - (avBlockStage === 4 ? 5 : 0) - pressureLoad * 3,
+      50,
+      68,
+    );
+  }
   if (disease.id === "heart-failure") {
     ejectionFraction = clamp(
       specificValue - progression * 0.18,
@@ -613,9 +651,20 @@ export function deriveSimulation(
     ejectionFraction = clamp(65 - severity01 * 10, 38, 68);
   }
 
-  const outputLoss = clamp((5.2 - cardiacOutput) / 4, 0, 0.36);
+  const outputLoss =
+    disease.id === "av-block"
+      ? clamp((4.2 - cardiacOutput) / 8, 0, 0.18)
+      : clamp((5.2 - cardiacOutput) / 4, 0, 0.36);
   const rhythmPressureLoss =
-    disease.id === "vt" ? severity01 * 0.24 : disease.id === "av-block" ? severity01 * 0.14 : 0;
+    disease.id === "vt"
+      ? severity01 * 0.24
+      : disease.id === "av-block"
+        ? avBlockStage === 4
+          ? 0.18 + severity01 * 0.08
+          : avBlockStage === 3
+            ? 0.08
+            : 0.03
+        : 0;
   const currentSystolic = clamp(
     Math.round(vitals.systolic * (1 - outputLoss - rhythmPressureLoss)),
     62,
@@ -643,6 +692,7 @@ export function deriveSimulation(
     stabilityTone = "danger";
   } else if (
     disease.id === "vt" ||
+    (disease.id === "av-block" && avBlockStage >= 3) ||
     currentSystolic < 102 ||
     cardiacOutput < 3.8 ||
     severity > 72
@@ -655,6 +705,7 @@ export function deriveSimulation(
     severity,
     heartRate,
     atrialRate,
+    avBlockStage,
     map,
     currentSystolic,
     currentDiastolic,

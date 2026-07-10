@@ -11,6 +11,7 @@ import {
 } from "react";
 import * as THREE from "three";
 import { afibRrIntervalMs, getAfibBeat } from "./afibModel";
+import { getAvBlockRhythm } from "./avBlockModel";
 import {
   computeCardiacMotion,
   type HeartMotionTelemetry,
@@ -623,6 +624,7 @@ function HeartModel({
   const atrialAssembly = useRef<THREE.Group>(null);
   const afibElectricalActivity = useRef<THREE.Group>(null);
   const vtFocus = useRef<THREE.Group>(null);
+  const escapeFocus = useRef<THREE.Group>(null);
   const coronaryLayer = useRef<THREE.Group>(null);
   const posteriorCoronaryLayer = useRef<THREE.Group>(null);
   const conductionLayer = useRef<THREE.Group>(null);
@@ -633,6 +635,7 @@ function HeartModel({
   const electricPulse = useRef<THREE.Mesh>(null);
   const lesionPatch = useRef<THREE.Mesh>(null);
   const phase = useRef(0);
+  const elapsedSeconds = useRef(0);
 
   const severity = simulation.severity / 100;
   const activeColor = disease.color;
@@ -826,6 +829,7 @@ function HeartModel({
     }
     if (paused) return;
 
+    elapsedSeconds.current += delta;
     phase.current += (delta * simulation.heartRate) / 60;
 
     const cycle = phase.current;
@@ -837,10 +841,24 @@ function HeartModel({
       disease.id === "afib"
         ? getAfibBeat(cycle, simulation.rhythmIrregularity)
         : null;
-    const motionPhase = afibBeat
-      ? Math.min(afibBeat.elapsed, 0.995)
-      : cycle;
-    const beatIndex = afibBeat?.beatIndex ?? Math.floor(cycle);
+    const avRhythm =
+      disease.id === "av-block"
+        ? getAvBlockRhythm(
+            elapsedSeconds.current,
+            simulation.atrialRate,
+            simulation.heartRate,
+            simulation.avBlockStage,
+          )
+        : null;
+    const motionPhase = avRhythm
+      ? avRhythm.ventricularPhase
+      : afibBeat
+        ? Math.min(afibBeat.elapsed, 0.995)
+        : cycle;
+    const beatIndex =
+      avRhythm?.ventricularBeatIndex ??
+      afibBeat?.beatIndex ??
+      Math.floor(cycle);
     const ventricularStrength = afibBeat?.ventricularStrength ?? 1;
     const motion = computeCardiacMotion({
       phase: motionPhase,
@@ -849,25 +867,36 @@ function HeartModel({
       severity,
       contractility: simulation.contractility,
       ventricularStrength,
-      atrialPhase: disease.id === "vt" ? atrialCycle : undefined,
+      atrialPhase: avRhythm
+        ? avRhythm.atrialPhase
+        : disease.id === "vt"
+          ? atrialCycle
+          : undefined,
+      ventricularSuppressed: avRhythm
+        ? avRhythm.dropped && !avRhythm.ventricularEscape
+        : undefined,
     });
     const ventricularSystole = motion.ventricular;
     const atrialSystole = motion.atrial;
-    const skipped = motion.skipped;
     const amplitude = 0.038 + simulation.contractility * 0.05;
     Object.assign(motionTelemetry, {
       phase: motion.phase,
+      elapsedSeconds: elapsedSeconds.current,
       rhythmPosition: cycle,
       beatIndex,
       rrIntervalMs: afibBeat
         ? afibRrIntervalMs(afibBeat.interval, simulation.heartRate)
         : 60_000 / simulation.heartRate,
       atrialRate: simulation.atrialRate,
+      avBlockStage: simulation.avBlockStage,
+      avConductionProgress: avRhythm?.conductionProgress ?? 0,
+      avDropped: avRhythm?.dropped ?? false,
+      ventricularEscape: avRhythm?.ventricularEscape ?? false,
       ventricularStrength,
       atrial: motion.atrial,
       ventricular: motion.ventricular,
       filling: motion.filling,
-      skipped: motion.skipped,
+      skipped: avRhythm?.dropped ?? motion.skipped,
       stage: motion.stage,
     });
 
@@ -970,6 +999,18 @@ function HeartModel({
       });
     }
 
+    if (escapeFocus.current) {
+      const escapePulse = avRhythm?.ventricularEscape
+        ? ventricularSystole
+        : 0;
+      escapeFocus.current.scale.setScalar(0.68 + escapePulse * 0.62);
+      escapeFocus.current.children.forEach((child) => {
+        const material = (child as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        if (material) material.opacity = 0.2 + escapePulse * 0.75;
+      });
+    }
+
     if (greatVessels.current) {
       greatVessels.current.position.y = ventricularSystole * 0.022;
       greatVessels.current.scale.set(
@@ -1029,10 +1070,9 @@ function HeartModel({
           0.58 + ventricularSystole * 0.7,
         );
       } else {
-        let progress = motion.phase;
-        if (disease.id === "av-block" && progress > 0.43 && skipped) {
-          progress = 0.43;
-        }
+        const progress = avRhythm
+          ? avRhythm.conductionProgress
+          : motion.phase;
         electricPulse.current.position.copy(
           conductionCurve.getPointAt(progress),
         );
@@ -1075,6 +1115,31 @@ function HeartModel({
                 color={activeColor}
                 transparent
                 opacity={0.5}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+              />
+            </mesh>
+          </group>
+        )}
+
+        {disease.id === "av-block" && simulation.avBlockStage === 4 && (
+          <group ref={escapeFocus} position={[-0.18, -1.12, 0.92]}>
+            <mesh>
+              <sphereGeometry args={[0.075, 20, 14]} />
+              <meshBasicMaterial
+                color={activeColor}
+                transparent
+                opacity={0.62}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+              />
+            </mesh>
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[0.14, 0.018, 14, 48]} />
+              <meshBasicMaterial
+                color={activeColor}
+                transparent
+                opacity={0.42}
                 depthWrite={false}
                 blending={THREE.AdditiveBlending}
               />

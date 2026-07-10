@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getAfibBeat } from "./afibModel";
+import {
+  avBlockEcgValue,
+  type AvBlockStage,
+} from "./avBlockModel";
 import type { HeartMotionTelemetry } from "./heartMotion";
 import type { Disease, DerivedSimulation, EcgPattern } from "./simulation";
 import { vtEcgValue, type EcgLead as Lead } from "./vtModel";
@@ -90,6 +94,7 @@ function ecgValue(
   pattern: EcgPattern,
   heartRate: number,
   atrialRate: number,
+  avBlockStage: AvBlockStage,
   severity: number,
   lead: Lead,
   healthy = false,
@@ -99,7 +104,6 @@ function ecgValue(
   const safeRate = healthy ? 72 : heartRate;
   const period = 60 / Math.max(28, safeRate);
   const local = time / period;
-  const beatIndex = Math.floor(local);
   const phase = ((local % 1) + 1) % 1;
   const modifier = leadModifier(lead, pattern);
 
@@ -114,11 +118,13 @@ function ecgValue(
   }
 
   if (pattern === "av-block") {
-    const p = 0.15 * gaussian(phase, 0.15, 0.026);
-    const dropEvery = severity01 > 0.72 ? 3 : 2;
-    const dropped = beatIndex % dropEvery !== 0;
-    if (dropped) return p;
-    return (baseWave(phase, lead) + p * 0.12) * modifier;
+    return avBlockEcgValue(
+      time,
+      atrialRate,
+      heartRate,
+      avBlockStage,
+      lead,
+    );
   }
 
   let value = baseWave(phase, lead);
@@ -231,6 +237,7 @@ export function EcgMonitor({
           disease.pattern,
           simulation.heartRate,
           simulation.atrialRate,
+          simulation.avBlockStage,
           simulation.severity,
           lead,
           healthy,
@@ -258,6 +265,8 @@ export function EcgMonitor({
           timeRef.current =
             (motionTelemetry.rhythmPosition * 60) /
             Math.max(28, simulation.heartRate);
+        } else if (disease.id === "av-block" && !reducedMotion) {
+          timeRef.current = motionTelemetry.elapsedSeconds;
         }
       }
 
@@ -322,15 +331,51 @@ export function EcgMonitor({
       <div className="ecg-readouts" aria-label="Lecturas del ECG">
         <div>
           <span>Ritmo</span>
-          <strong>{disease.rhythmLabel}</strong>
+          <strong>
+            {disease.id === "av-block"
+              ? simulation.avBlockStage === 1
+                ? "Sinusal · conducción 1:1"
+                : simulation.avBlockStage === 2
+                  ? "Wenckebach · conducción 4:3"
+                  : simulation.avBlockStage === 3
+                    ? "Mobitz II · conducción 3:2"
+                    : "Disociación AV completa"
+              : disease.rhythmLabel}
+          </strong>
         </div>
         <div>
           <span>QRS</span>
-          <strong>{disease.qrsLabel}</strong>
+          <strong>
+            {disease.id === "av-block"
+              ? simulation.avBlockStage <= 2
+                ? "Conducido · estrecho"
+                : simulation.avBlockStage === 3
+                  ? "Conducido · 130 ms"
+                  : "Escape · 150 ms"
+              : disease.qrsLabel}
+          </strong>
         </div>
         <div>
-          <span>{disease.id === "afib" ? "Ondas P" : "ST–T"}</span>
-          <strong>{disease.id === "afib" ? "Ausentes · ondas f" : disease.stLabel}</strong>
+          <span>
+            {disease.id === "afib"
+              ? "Ondas P"
+              : disease.id === "av-block"
+                ? "Relación P–QRS"
+                : "ST–T"}
+          </span>
+          <strong>
+            {disease.id === "afib"
+              ? "Ausentes · ondas f"
+              : disease.id === "av-block"
+                ? simulation.avBlockStage === 1
+                  ? "PR fijo 240 ms"
+                  : simulation.avBlockStage === 2
+                    ? "PR 180 → 240 → 310 ms"
+                    : simulation.avBlockStage === 3
+                      ? "PR fijo 180 ms + bloqueos"
+                      : "Sin relación fija"
+                : disease.stLabel}
+          </strong>
         </div>
       </div>
 

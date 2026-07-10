@@ -77,6 +77,10 @@ const SOURCES = [
     href: "https://academic.oup.com/eurheartj/article/43/40/3997/6675633",
   },
   {
+    label: "ESC 2021 · Estimulación cardíaca y bloqueo AV",
+    href: "https://academic.oup.com/eurheartj/article/42/35/3427/6358547",
+  },
+  {
     label: "Echo Research & Practice · Variación latido a latido en FA",
     href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC5834126/",
   },
@@ -195,7 +199,7 @@ function severityLabel(value: number) {
 const MOTION_FOCUS: Record<DiseaseId, string> = {
   afib: "Sin contracción auricular útil · fuerza ventricular variable",
   vt: "Activación ventricular retardada · aurículas independientes",
-  "av-block": "Algunos impulsos no activan los ventrículos",
+  "av-block": "Aurículas regulares · conducción AV según el grado",
   ischemia: "Pared anterior: contracción debilitada",
   infarction: "Territorio anterior y apical: movimiento muy reducido",
   "heart-failure": "Ventrículo izquierdo: contracción global débil",
@@ -228,9 +232,13 @@ function CardiacMotionGuide({
     rrIntervalMs: telemetry.rrIntervalMs,
     ventricularStrength: telemetry.ventricularStrength,
     atrialRate: telemetry.atrialRate,
+    avBlockStage: telemetry.avBlockStage,
+    avDropped: telemetry.avDropped,
+    ventricularEscape: telemetry.ventricularEscape,
   });
   const lastStage = useRef<CardiacStage>(telemetry.stage);
   const lastBeat = useRef(Number.NaN);
+  const lastAvState = useRef("");
 
   useEffect(() => {
     let frame = 0;
@@ -239,16 +247,22 @@ function CardiacMotionGuide({
         lastStage.current = telemetry.stage;
         setStage(telemetry.stage);
       }
+      const avState = `${telemetry.avBlockStage}-${telemetry.avDropped}-${telemetry.ventricularEscape}-${telemetry.beatIndex}`;
       if (
-        (disease.id === "afib" || disease.id === "vt") &&
-        telemetry.beatIndex !== lastBeat.current
+        ((disease.id === "afib" || disease.id === "vt") &&
+          telemetry.beatIndex !== lastBeat.current) ||
+        (disease.id === "av-block" && avState !== lastAvState.current)
       ) {
         lastBeat.current = telemetry.beatIndex;
+        lastAvState.current = avState;
         setRhythmBeat({
           beatIndex: telemetry.beatIndex,
           rrIntervalMs: telemetry.rrIntervalMs,
           ventricularStrength: telemetry.ventricularStrength,
           atrialRate: telemetry.atrialRate,
+          avBlockStage: telemetry.avBlockStage,
+          avDropped: telemetry.avDropped,
+          ventricularEscape: telemetry.ventricularEscape,
         });
       }
       frame = window.requestAnimationFrame(update);
@@ -289,6 +303,18 @@ function CardiacMotionGuide({
         <span className="rhythm-motion-readout">
           <span>Aurículas {Math.round(rhythmBeat.atrialRate)} lpm</span>
           <span>Ventrículos {Math.round(60_000 / Math.max(1, rhythmBeat.rrIntervalMs))} lpm</span>
+        </span>
+      )}
+      {disease.id === "av-block" && !movementPaused && (
+        <span className="rhythm-motion-readout">
+          <span>A {Math.round(rhythmBeat.atrialRate)} · V {Math.round(60_000 / Math.max(1, rhythmBeat.rrIntervalMs))} lpm</span>
+          <span>
+            {rhythmBeat.avBlockStage === 4
+              ? "Escape ventricular"
+              : rhythmBeat.avDropped
+                ? "Impulso bloqueado"
+                : "Impulso conducido"}
+          </span>
         </span>
       )}
     </div>
@@ -479,6 +505,8 @@ export default function CardioLab() {
                 ? "Respuesta ventricular media"
                 : disease.id === "vt"
                   ? "Frecuencia auricular"
+                  : disease.id === "av-block"
+                    ? "Frecuencia auricular"
                   : "FC basal"
             }
             value={vitals.heartRate}
@@ -488,7 +516,7 @@ export default function CardioLab() {
             unit="lpm"
             onChange={(value) => setVital("heartRate", value)}
             hint={
-              disease.id === "vt"
+              disease.id === "vt" || disease.id === "av-block"
                 ? `Auricular actual: ${simulation.atrialRate} lpm`
                 : `Actual: ${simulation.heartRate} lpm`
             }
@@ -581,7 +609,13 @@ export default function CardioLab() {
 
           <div className="metric-ribbon" aria-label="Métricas hemodinámicas calculadas">
             <div>
-              <span>{disease.id === "vt" ? "Frecuencia ventricular" : "Frecuencia"}</span>
+              <span>
+                {disease.id === "vt"
+                  ? "Frecuencia ventricular"
+                  : disease.id === "av-block"
+                    ? "Frecuencia ventricular media"
+                    : "Frecuencia"}
+              </span>
               <strong>{simulation.heartRate}</strong>
               <small>lpm</small>
             </div>
@@ -819,7 +853,7 @@ export default function CardioLab() {
           <label className="inspector-slider">
             <span className="inspector-slider-head">
               <span>
-                {disease.id === "afib" || disease.id === "vt"
+                {disease.id === "afib" || disease.id === "vt" || disease.id === "av-block"
                   ? "Impacto hemodinámico inicial"
                   : "Severidad inicial"}
               </span>
@@ -857,7 +891,7 @@ export default function CardioLab() {
 
           <div className="inspector-result">
             <span>
-              {disease.id === "afib" || disease.id === "vt"
+              {disease.id === "afib" || disease.id === "vt" || disease.id === "av-block"
                 ? "Compromiso hemodinámico simulado"
                 : "Resultado simulado"}
             </span>
@@ -867,6 +901,8 @@ export default function CardioLab() {
                 ? "impacto basal + tiempo + modificadores; no mide ‘cantidad de fibrilación’"
                 : disease.id === "vt"
                   ? "impacto basal + frecuencia ventricular + tiempo + modificadores"
+                  : disease.id === "av-block"
+                    ? "impacto basal + grado de bloqueo + bradicardia resultante"
                 : "base + variable propia + tiempo + modificadores"}
             </small>
           </div>

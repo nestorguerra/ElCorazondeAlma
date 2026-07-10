@@ -4,10 +4,15 @@ export type CardiacStage = "atria" | "ventricles" | "filling";
 
 export type HeartMotionTelemetry = {
   phase: number;
+  elapsedSeconds: number;
   rhythmPosition: number;
   beatIndex: number;
   rrIntervalMs: number;
   atrialRate: number;
+  avBlockStage: number;
+  avConductionProgress: number;
+  avDropped: boolean;
+  ventricularEscape: boolean;
   ventricularStrength: number;
   atrial: number;
   ventricular: number;
@@ -24,6 +29,7 @@ type MotionInput = {
   contractility: number;
   ventricularStrength?: number;
   atrialPhase?: number;
+  ventricularSuppressed?: boolean;
 };
 
 export type CardiacMotion = HeartMotionTelemetry & {
@@ -50,10 +56,15 @@ const cyclicPulse = (phase: number, center: number, halfWidth: number) => {
 
 export const createHeartMotionTelemetry = (): HeartMotionTelemetry => ({
   phase: 0,
+  elapsedSeconds: 0,
   rhythmPosition: 0,
   beatIndex: 0,
   rrIntervalMs: 0,
   atrialRate: 0,
+  avBlockStage: 1,
+  avConductionProgress: 0,
+  avDropped: false,
+  ventricularEscape: false,
   ventricularStrength: 1,
   atrial: 0,
   ventricular: 0,
@@ -70,13 +81,15 @@ export function computeCardiacMotion({
   contractility,
   ventricularStrength = 1,
   atrialPhase,
+  ventricularSuppressed,
 }: MotionInput): CardiacMotion {
   const normalizedPhase = ((phase % 1) + 1) % 1;
   const normalizedSeverity = clamp(severity);
 
   const skipped =
     diseaseId === "av-block" &&
-    beatIndex % (normalizedSeverity > 0.68 ? 3 : 2) !== 0;
+    (ventricularSuppressed ??
+      beatIndex % (normalizedSeverity > 0.68 ? 3 : 2) !== 0);
 
   const ventricularRise = smoothStep(0.025, 0.13, normalizedPhase);
   const ventricularRelaxation =
@@ -106,10 +119,15 @@ export function computeCardiacMotion({
 
   return {
     phase: normalizedPhase,
+    elapsedSeconds: 0,
     rhythmPosition: normalizedPhase,
     beatIndex,
     rrIntervalMs: 0,
     atrialRate: 0,
+    avBlockStage: 1,
+    avConductionProgress: 0,
+    avDropped: false,
+    ventricularEscape: false,
     ventricularStrength,
     atrial,
     ventricular,
