@@ -679,6 +679,19 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
 }
 
+.afib-motion-readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+  color: color-mix(in srgb, var(--motion-color) 74%, white);
+  border-top: 1px solid color-mix(in srgb, var(--motion-color) 24%, transparent);
+  font-size: 7px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
 .heart-motion-guide.paused {
   opacity: 0.65;
 }

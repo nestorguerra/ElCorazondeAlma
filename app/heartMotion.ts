@@ -4,6 +4,10 @@ export type CardiacStage = "atria" | "ventricles" | "filling";
 
 export type HeartMotionTelemetry = {
   phase: number;
+  rhythmPosition: number;
+  beatIndex: number;
+  rrIntervalMs: number;
+  ventricularStrength: number;
   atrial: number;
   ventricular: number;
   filling: number;
@@ -17,6 +21,7 @@ type MotionInput = {
   diseaseId: DiseaseId;
   severity: number;
   contractility: number;
+  ventricularStrength?: number;
 };
 
 export type CardiacMotion = HeartMotionTelemetry & {
@@ -43,6 +48,10 @@ const cyclicPulse = (phase: number, center: number, halfWidth: number) => {
 
 export const createHeartMotionTelemetry = (): HeartMotionTelemetry => ({
   phase: 0,
+  rhythmPosition: 0,
+  beatIndex: 0,
+  rrIntervalMs: 0,
+  ventricularStrength: 1,
   atrial: 0,
   ventricular: 0,
   filling: 1,
@@ -56,6 +65,7 @@ export function computeCardiacMotion({
   diseaseId,
   severity,
   contractility,
+  ventricularStrength = 1,
 }: MotionInput): CardiacMotion {
   const normalizedPhase = ((phase % 1) + 1) % 1;
   const normalizedSeverity = clamp(severity);
@@ -68,16 +78,15 @@ export function computeCardiacMotion({
   const ventricularRelaxation =
     1 - smoothStep(0.42, 0.64, normalizedPhase);
   const coordinatedVentricular = ventricularRise * ventricularRelaxation;
-  const ventricular = skipped ? 0 : coordinatedVentricular;
+  const ventricular = skipped
+    ? 0
+    : coordinatedVentricular * clamp(ventricularStrength, 0.7, 1.18);
 
   const coordinatedAtrial = Math.pow(
     cyclicPulse(normalizedPhase, 0.86, 0.145),
     1.22,
   );
-  const atrial =
-    diseaseId === "afib"
-      ? coordinatedAtrial * (1 - normalizedSeverity * 0.88)
-      : coordinatedAtrial;
+  const atrial = diseaseId === "afib" ? 0 : coordinatedAtrial;
 
   const filling = clamp(1 - Math.max(ventricular, atrial) * 0.92);
   const stage: CardiacStage =
@@ -89,13 +98,16 @@ export function computeCardiacMotion({
 
   return {
     phase: normalizedPhase,
+    rhythmPosition: normalizedPhase,
+    beatIndex,
+    rrIntervalMs: 0,
+    ventricularStrength,
     atrial,
     ventricular,
     filling,
     skipped,
     stage,
-    atrialFlutter:
-      diseaseId === "afib" ? 0.24 + normalizedSeverity * 0.76 : 0,
+    atrialFlutter: diseaseId === "afib" ? 0.58 : 0,
     dyssynchrony:
       diseaseId === "vt" ? 0.18 + normalizedSeverity * 0.82 : 0,
     regionalDysfunction:

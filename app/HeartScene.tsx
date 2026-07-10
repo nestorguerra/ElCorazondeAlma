@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as THREE from "three";
+import { afibRrIntervalMs, getAfibBeat } from "./afibModel";
 import {
   computeCardiacMotion,
   type HeartMotionTelemetry,
@@ -124,9 +125,12 @@ vec3 radialDirection = normalize(
   vec3(position.x, 0.08, position.z) + vec3(0.0001)
 );
 float atrialRipple = sin(
-  uTime * 25.0 + position.x * 68.0 + position.z * 54.0
-) * uAtrialFlutter * atrialMask;
-transformed += radialDirection * atrialRipple * 0.007;
+  uTime * 39.0 + position.x * 68.0 + position.z * 54.0
+) + 0.42 * sin(
+  uTime * 61.0 - position.x * 41.0 + position.z * 73.0
+);
+transformed += radialDirection * atrialRipple *
+  uAtrialFlutter * atrialMask * 0.0042;
 
 float ventricularRipple = sin(
   uTime * 19.0 + position.y * 43.0 + position.x * 34.0
@@ -141,6 +145,17 @@ transformed += radialDirection * ventricularRipple * 0.009;`,
 const subscribeToHydration = () => () => undefined;
 const clientMountedSnapshot = () => true;
 const serverMountedSnapshot = () => false;
+
+const AFIB_ATRIAL_FOCI: Point3[] = [
+  [-0.55, 1.2, 1.12],
+  [-0.35, 1.34, 1.08],
+  [-0.17, 1.14, 1.14],
+  [-0.48, 0.94, 1.16],
+  [0.18, 1.2, 1.14],
+  [0.38, 1.36, 1.08],
+  [0.58, 1.17, 1.1],
+  [0.42, 0.96, 1.17],
+];
 
 const CORONARY_VESSELS: VesselDefinition[] = [
   {
@@ -589,6 +604,7 @@ function HeartModel({
   const root = useRef<THREE.Group>(null);
   const ventricularAssembly = useRef<THREE.Group>(null);
   const atrialAssembly = useRef<THREE.Group>(null);
+  const afibElectricalActivity = useRef<THREE.Group>(null);
   const coronaryLayer = useRef<THREE.Group>(null);
   const posteriorCoronaryLayer = useRef<THREE.Group>(null);
   const conductionLayer = useRef<THREE.Group>(null);
@@ -790,22 +806,25 @@ function HeartModel({
     }
     if (paused) return;
 
-    const irregularity =
-      disease.id === "afib"
-        ? 1 +
-          0.15 * Math.sin(state.clock.elapsedTime * 2.7) +
-          0.07 * Math.sin(state.clock.elapsedTime * 5.3)
-        : 1;
-    phase.current +=
-      (delta * simulation.heartRate * irregularity) / 60;
+    phase.current += (delta * simulation.heartRate) / 60;
 
     const cycle = phase.current;
+    const afibBeat =
+      disease.id === "afib"
+        ? getAfibBeat(cycle, simulation.rhythmIrregularity)
+        : null;
+    const motionPhase = afibBeat
+      ? Math.min(afibBeat.elapsed, 0.995)
+      : cycle;
+    const beatIndex = afibBeat?.beatIndex ?? Math.floor(cycle);
+    const ventricularStrength = afibBeat?.ventricularStrength ?? 1;
     const motion = computeCardiacMotion({
-      phase: cycle,
-      beatIndex: Math.floor(cycle),
+      phase: motionPhase,
+      beatIndex,
       diseaseId: disease.id,
       severity,
       contractility: simulation.contractility,
+      ventricularStrength,
     });
     const ventricularSystole = motion.ventricular;
     const atrialSystole = motion.atrial;
@@ -818,6 +837,12 @@ function HeartModel({
 
     Object.assign(motionTelemetry, {
       phase: motion.phase,
+      rhythmPosition: cycle,
+      beatIndex,
+      rrIntervalMs: afibBeat
+        ? afibRrIntervalMs(afibBeat.interval, simulation.heartRate)
+        : 60_000 / simulation.heartRate,
+      ventricularStrength,
       atrial: motion.atrial,
       ventricular: motion.ventricular,
       filling: motion.filling,
@@ -876,21 +901,38 @@ function HeartModel({
     }
 
     if (atrialAssembly.current) {
-      const fibrillation =
+      const fibrillationX =
         disease.id === "afib"
-          ? Math.sin(
-              state.clock.elapsedTime * (17 + severity * 13),
-            ) *
-            0.025 *
-            severity
+          ? Math.sin(state.clock.elapsedTime * 39) * 0.0035 +
+            Math.sin(state.clock.elapsedTime * 61) * 0.0018
+          : 0;
+      const fibrillationZ =
+        disease.id === "afib"
+          ? Math.sin(state.clock.elapsedTime * 47 + 1.4) * 0.0032 +
+            Math.sin(state.clock.elapsedTime * 67) * 0.0015
           : 0;
       const atrialContraction = atrialSystole * 0.065;
       atrialAssembly.current.scale.set(
-        1 - atrialContraction + fibrillation,
-        1 - atrialContraction * 0.72 - fibrillation * 0.35,
-        1 - atrialContraction + fibrillation,
+        1 - atrialContraction + fibrillationX,
+        1 - atrialContraction * 0.72 - fibrillationZ * 0.28,
+        1 - atrialContraction + fibrillationZ,
       );
-      atrialAssembly.current.rotation.y = fibrillation * 1.3;
+      atrialAssembly.current.rotation.y = fibrillationX * 0.65;
+    }
+
+    if (afibElectricalActivity.current) {
+      afibElectricalActivity.current.children.forEach((focus, index) => {
+        const pulse =
+          0.5 +
+          0.5 *
+            Math.sin(
+              state.clock.elapsedTime * (34 + index * 3.7) + index * 1.91,
+            );
+        focus.scale.setScalar(0.55 + pulse * 0.72);
+        const material = (focus as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        material.opacity = 0.18 + pulse * 0.7;
+      });
     }
 
     if (greatVessels.current) {
@@ -1112,6 +1154,22 @@ function HeartModel({
               distance={0.85}
               position={[0.4, 1.08, 1.31]}
             />
+            {disease.id === "afib" && (
+              <group ref={afibElectricalActivity}>
+                {AFIB_ATRIAL_FOCI.map((position, index) => (
+                  <mesh key={`afib-focus-${index}`} position={position}>
+                    <sphereGeometry args={[0.034, 14, 10]} />
+                    <meshBasicMaterial
+                      color={activeColor}
+                      transparent
+                      opacity={0.5}
+                      depthWrite={false}
+                      blending={THREE.AdditiveBlending}
+                    />
+                  </mesh>
+                ))}
+              </group>
+            )}
           </>
         )}
       </group>

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { getAfibBeat } from "./afibModel";
+import type { HeartMotionTelemetry } from "./heartMotion";
 import type { Disease, DerivedSimulation, EcgPattern } from "./simulation";
 
 type Lead = "DII" | "V2" | "V5";
@@ -10,6 +12,7 @@ type EcgMonitorProps = {
   simulation: DerivedSimulation;
   paused: boolean;
   compareHealthy: boolean;
+  motionTelemetry: HeartMotionTelemetry;
 };
 
 function gaussian(x: number, center: number, width: number) {
@@ -48,6 +51,40 @@ function baseWave(phase: number, lead: Lead) {
   return (p + q + r + s + t) * polarity;
 }
 
+export function afibEcgValue(
+  time: number,
+  heartRate: number,
+  lead: Lead,
+  irregularity = 0.78,
+) {
+  const rhythmPosition = (time * Math.max(28, heartRate)) / 60;
+  const beat = getAfibBeat(rhythmPosition, irregularity);
+  const secondsSinceBeat = (beat.elapsed * 60) / Math.max(28, heartRate);
+  const atrialAmplitude = lead === "V2" ? 0.052 : lead === "DII" ? 0.034 : 0.024;
+  const fibrillatoryBaseline =
+    atrialAmplitude *
+    (Math.sin(time * Math.PI * 2 * 6.2 + 0.34 * Math.sin(time * 1.7)) +
+      0.46 * Math.sin(time * Math.PI * 2 * 8.7 + 1.2) +
+      0.22 * Math.sin(time * Math.PI * 2 * 10.1 + 2.35));
+
+  const morphology =
+    lead === "V2"
+      ? { q: -0.04, r: 0.48, s: -0.72, t: 0.13 }
+      : lead === "V5"
+        ? { q: -0.08, r: 1.08, s: -0.2, t: 0.32 }
+        : { q: -0.11, r: 1.04, s: -0.3, t: 0.27 };
+  const qrs =
+    morphology.q * gaussian(secondsSinceBeat, 0.015, 0.006) +
+    morphology.r * gaussian(secondsSinceBeat, 0.031, 0.008) +
+    morphology.s * gaussian(secondsSinceBeat, 0.052, 0.011);
+  const tWave =
+    morphology.t *
+    (0.92 + (beat.ventricularStrength - 0.94) * 0.22) *
+    gaussian(secondsSinceBeat, 0.27, 0.065);
+
+  return qrs + tWave + fibrillatoryBaseline;
+}
+
 function ecgValue(
   time: number,
   pattern: EcgPattern,
@@ -59,11 +96,7 @@ function ecgValue(
   const severity01 = healthy ? 0 : severity / 100;
   const safeRate = healthy ? 72 : heartRate;
   const period = 60 / Math.max(28, safeRate);
-  const irregularWarp =
-    pattern === "afib" && !healthy
-      ? time + 0.11 * Math.sin(time * 1.7) + 0.06 * Math.sin(time * 4.9)
-      : time;
-  const local = irregularWarp / period;
+  const local = time / period;
   const beatIndex = Math.floor(local);
   const phase = ((local % 1) + 1) % 1;
   const modifier = leadModifier(lead, pattern);
@@ -79,16 +112,7 @@ function ecgValue(
   }
 
   if (pattern === "afib") {
-    const fibrillation =
-      (0.024 + severity01 * 0.038) *
-      (Math.sin(time * 38) + 0.5 * Math.sin(time * 61) + 0.25 * Math.sin(time * 83));
-    const qrsScale = 0.86 + 0.14 * Math.sin(beatIndex * 2.39);
-    const qrs =
-      -0.12 * gaussian(phase, 0.288, 0.012) +
-      1.06 * gaussian(phase, 0.31, 0.009) -
-      0.31 * gaussian(phase, 0.335, 0.013) +
-      0.27 * gaussian(phase, 0.58, 0.065);
-    return (qrs * qrsScale + fibrillation) * modifier;
+    return afibEcgValue(time, heartRate, lead);
   }
 
   if (pattern === "av-block") {
@@ -139,6 +163,7 @@ export function EcgMonitor({
   simulation,
   paused,
   compareHealthy,
+  motionTelemetry,
 }: EcgMonitorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const timeRef = useRef(0);
@@ -170,20 +195,25 @@ export function EcgMonitor({
     observer.observe(canvas);
     resize();
 
-    const drawGrid = () => {
+    const secondsVisible = 5;
+    const drawGrid = (amplitude: number) => {
       context.fillStyle = "#07141b";
       context.fillRect(0, 0, width, height);
-      for (let x = 0; x <= width; x += 10) {
-        context.strokeStyle = x % 50 === 0 ? "rgba(78, 209, 183, 0.14)" : "rgba(78, 209, 183, 0.055)";
-        context.lineWidth = x % 50 === 0 ? 1 : 0.6;
+      const horizontalSmallBox = (width / secondsVisible) * 0.04;
+      const verticalSmallBox = amplitude * 0.1;
+      for (let index = 0, x = 0; x <= width; index += 1, x = index * horizontalSmallBox) {
+        const major = index % 5 === 0;
+        context.strokeStyle = major ? "rgba(78, 209, 183, 0.14)" : "rgba(78, 209, 183, 0.055)";
+        context.lineWidth = major ? 1 : 0.6;
         context.beginPath();
         context.moveTo(x + 0.5, 0);
         context.lineTo(x + 0.5, height);
         context.stroke();
       }
-      for (let y = 0; y <= height; y += 10) {
-        context.strokeStyle = y % 50 === 0 ? "rgba(78, 209, 183, 0.14)" : "rgba(78, 209, 183, 0.055)";
-        context.lineWidth = y % 50 === 0 ? 1 : 0.6;
+      for (let index = 0, y = 0; y <= height; index += 1, y = index * verticalSmallBox) {
+        const major = index % 5 === 0;
+        context.strokeStyle = major ? "rgba(78, 209, 183, 0.14)" : "rgba(78, 209, 183, 0.055)";
+        context.lineWidth = major ? 1 : 0.6;
         context.beginPath();
         context.moveTo(0, y + 0.5);
         context.lineTo(width, y + 0.5);
@@ -194,7 +224,6 @@ export function EcgMonitor({
     const drawTrace = (healthy: boolean) => {
       const baseline = height * 0.53;
       const amplitude = Math.min(64, height * 0.31);
-      const secondsVisible = 5.5;
       context.beginPath();
       for (let x = 0; x <= width; x += 1.5) {
         const sampleTime = timeRef.current - secondsVisible + (x / width) * secondsVisible;
@@ -222,9 +251,17 @@ export function EcgMonitor({
       if (lastFrameRef.current === null) lastFrameRef.current = timestamp;
       const delta = Math.min(0.05, (timestamp - lastFrameRef.current) / 1000);
       lastFrameRef.current = timestamp;
-      if (!paused && document.visibilityState === "visible") timeRef.current += delta;
+      if (!paused && document.visibilityState === "visible") {
+        timeRef.current += delta;
+        if (disease.id === "afib") {
+          timeRef.current =
+            (motionTelemetry.rhythmPosition * 60) /
+            Math.max(28, simulation.heartRate);
+        }
+      }
 
-      drawGrid();
+      const amplitude = Math.min(64, height * 0.31);
+      drawGrid(amplitude);
       if (compareHealthy) drawTrace(true);
       drawTrace(false);
 
@@ -244,7 +281,7 @@ export function EcgMonitor({
       observer.disconnect();
       lastFrameRef.current = null;
     };
-  }, [compareHealthy, disease, lead, paused, simulation.heartRate, simulation.severity]);
+  }, [compareHealthy, disease, lead, motionTelemetry, paused, simulation.heartRate, simulation.severity]);
 
   return (
     <div className="ecg-module">
@@ -291,8 +328,8 @@ export function EcgMonitor({
           <strong>{disease.qrsLabel}</strong>
         </div>
         <div>
-          <span>ST–T</span>
-          <strong>{disease.stLabel}</strong>
+          <span>{disease.id === "afib" ? "Ondas P" : "ST–T"}</span>
+          <strong>{disease.id === "afib" ? "Ausentes · ondas f" : disease.stLabel}</strong>
         </div>
       </div>
 

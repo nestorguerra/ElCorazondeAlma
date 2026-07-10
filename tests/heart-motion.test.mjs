@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { getAfibBeat } from "../app/afibModel.ts";
 import { computeCardiacMotion } from "../app/heartMotion.ts";
+import { DEFAULT_VITALS, deriveSimulation, getDisease } from "../app/simulation.ts";
 
 const baseInput = {
   beatIndex: 0,
@@ -24,7 +26,6 @@ test("separates atrial contraction, ventricular ejection and filling", () => {
 });
 
 test("models disease-specific mechanical movement", () => {
-  const normalAtria = computeCardiacMotion({ ...baseInput, phase: 0.86 });
   const afib = computeCardiacMotion({
     ...baseInput,
     phase: 0.86,
@@ -49,11 +50,45 @@ test("models disease-specific mechanical movement", () => {
     severity: 0.8,
   });
 
-  assert.ok(afib.atrial < normalAtria.atrial * 0.4);
-  assert.ok(afib.atrialFlutter > 0.8);
+  assert.equal(afib.atrial, 0);
+  assert.ok(afib.atrialFlutter > 0.5);
   assert.ok(infarction.regionalDysfunction > ischemia.regionalDysfunction);
   assert.equal(blocked.skipped, true);
   assert.equal(blocked.ventricular, 0);
+});
+
+test("models AF as aperiodic R-R intervals with beat-to-beat force variation", () => {
+  const beats = new Map();
+  for (let position = 0; position < 16; position += 0.025) {
+    const beat = getAfibBeat(position, 0.78);
+    beats.set(beat.beatIndex, beat);
+  }
+
+  const sample = [...beats.values()].slice(2, 14);
+  const intervals = sample.map((beat) => beat.interval);
+  const strengths = sample.map((beat) => beat.ventricularStrength);
+  const roundedIntervals = new Set(intervals.map((value) => value.toFixed(3)));
+
+  assert.ok(roundedIntervals.size >= 10, "R-R intervals should not repeat in a short pattern");
+  assert.ok(Math.min(...intervals) > 0.5);
+  assert.ok(Math.max(...intervals) < 1.5);
+  assert.ok(Math.max(...strengths) - Math.min(...strengths) > 0.15);
+});
+
+test("keeps intrinsic ventricular contractility and EF while AF removes atrial contribution", () => {
+  const simulation = deriveSimulation(
+    DEFAULT_VITALS,
+    getDisease("afib"),
+    44,
+    96,
+    0,
+  );
+
+  assert.equal(simulation.heartRate, 96);
+  assert.equal(simulation.contractility, 1);
+  assert.ok(simulation.ejectionFraction >= 60);
+  assert.equal(simulation.rhythmIrregularity, 0.78);
+  assert.ok(simulation.strokeVolume < 74);
 });
 
 test("deforms the anatomical mesh regionally and keeps surface vessels moving", async () => {
@@ -68,4 +103,20 @@ test("deforms the anatomical mesh regionally and keeps surface vessels moving", 
   assert.match(source, /uDyssynchrony/);
   assert.match(source, /coronaryLayer/);
   assert.match(source, /motionTelemetry/);
+  assert.match(source, /getAfibBeat/);
+  assert.match(source, /ventricularStrength/);
+  assert.match(source, /AFIB_ATRIAL_FOCI/);
+});
+
+test("renders AF ECG without P waves and with calibrated paper spacing", async () => {
+  const source = await readFile(
+    new URL("../app/EcgMonitor.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /secondsSinceBeat/);
+  assert.match(source, /fibrillatoryBaseline/);
+  assert.match(source, /Ausentes · ondas f/);
+  assert.match(source, /horizontalSmallBox.*0\.04/s);
+  assert.doesNotMatch(source, /irregularWarp/);
 });

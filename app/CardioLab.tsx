@@ -69,6 +69,14 @@ type LessonTab = "heart" | "cause" | "caution";
 
 const SOURCES = [
   {
+    label: "ESC 2024 · Guía clínica de fibrilación auricular",
+    href: "https://academic.oup.com/eurheartj/article/45/36/3314/7738779",
+  },
+  {
+    label: "Echo Research & Practice · Variación latido a latido en FA",
+    href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC5834126/",
+  },
+  {
     label: "NIH 3D · Base anatómica del corazón (3DPX-022787, dominio público)",
     href: "https://3d.nih.gov/entries/3DPX-022787",
   },
@@ -181,7 +189,7 @@ function severityLabel(value: number) {
 }
 
 const MOTION_FOCUS: Record<DiseaseId, string> = {
-  afib: "Aurículas: temblor irregular",
+  afib: "Sin contracción auricular útil · fuerza ventricular variable",
   vt: "Ventrículos: contracción rápida y descoordinada",
   "av-block": "Algunos impulsos no activan los ventrículos",
   ischemia: "Pared anterior: contracción debilitada",
@@ -211,7 +219,13 @@ function CardiacMotionGuide({
   reducedMotion: boolean;
 }) {
   const [stage, setStage] = useState<CardiacStage>(telemetry.stage);
+  const [afibBeat, setAfibBeat] = useState({
+    beatIndex: telemetry.beatIndex,
+    rrIntervalMs: telemetry.rrIntervalMs,
+    ventricularStrength: telemetry.ventricularStrength,
+  });
   const lastStage = useRef<CardiacStage>(telemetry.stage);
+  const lastBeat = useRef(telemetry.beatIndex);
 
   useEffect(() => {
     let frame = 0;
@@ -220,11 +234,19 @@ function CardiacMotionGuide({
         lastStage.current = telemetry.stage;
         setStage(telemetry.stage);
       }
+      if (disease.id === "afib" && telemetry.beatIndex !== lastBeat.current) {
+        lastBeat.current = telemetry.beatIndex;
+        setAfibBeat({
+          beatIndex: telemetry.beatIndex,
+          rrIntervalMs: telemetry.rrIntervalMs,
+          ventricularStrength: telemetry.ventricularStrength,
+        });
+      }
       frame = window.requestAnimationFrame(update);
     };
     frame = window.requestAnimationFrame(update);
     return () => window.cancelAnimationFrame(frame);
-  }, [telemetry]);
+  }, [disease.id, telemetry]);
 
   const movementPaused = paused || reducedMotion;
 
@@ -248,6 +270,12 @@ function CardiacMotionGuide({
         ))}
       </div>
       <strong>{movementPaused ? "Movimiento pausado" : MOTION_FOCUS[disease.id]}</strong>
+      {disease.id === "afib" && !movementPaused && (
+        <span className="afib-motion-readout">
+          <span>R–R {Math.round(afibBeat.rrIntervalMs)} ms</span>
+          <span>Fuerza {Math.round(afibBeat.ventricularStrength * 100)}%</span>
+        </span>
+      )}
     </div>
   );
 }
@@ -660,6 +688,7 @@ export default function CardioLab() {
             simulation={simulation}
             paused={paused}
             compareHealthy={compareHealthy}
+            motionTelemetry={motionTelemetry}
           />
 
           <div className="lesson-module">
@@ -763,7 +792,7 @@ export default function CardioLab() {
 
           <label className="inspector-slider">
             <span className="inspector-slider-head">
-              <span>Severidad inicial</span>
+              <span>{disease.id === "afib" ? "Impacto hemodinámico inicial" : "Severidad inicial"}</span>
               <strong>{Math.round(baseSeverity)}% · {severityLabel(baseSeverity)}</strong>
             </span>
             <input
@@ -797,9 +826,13 @@ export default function CardioLab() {
           </label>
 
           <div className="inspector-result">
-            <span>Resultado simulado</span>
+            <span>{disease.id === "afib" ? "Compromiso hemodinámico simulado" : "Resultado simulado"}</span>
             <strong>{Math.round(simulation.severity)}%</strong>
-            <small>base + variable propia + tiempo + modificadores</small>
+            <small>
+              {disease.id === "afib"
+                ? "impacto basal + tiempo + modificadores; no mide ‘cantidad de fibrilación’"
+                : "base + variable propia + tiempo + modificadores"}
+            </small>
           </div>
         </div>
       </section>
@@ -846,7 +879,7 @@ export default function CardioLab() {
             <div className="modal-warning">
               <ShieldAlert size={18} />
               <span>
-                En infarto, valvulopatías, insuficiencia cardíaca y pericarditis, el ECG es solo una pieza del diagnóstico. El contexto clínico y otras pruebas son imprescindibles.
+                En FA, el diagnóstico requiere documentar el ritmo en un ECG. En el resto de escenarios, el contexto clínico y otras pruebas siguen siendo imprescindibles.
               </span>
             </div>
           </section>

@@ -84,6 +84,7 @@ export type DerivedSimulation = {
   cardiacOutput: number;
   ejectionFraction: number;
   contractility: number;
+  rhythmIrregularity: number;
   riskIndex: number;
   riskMultiplier: number;
   stability: "Compensado" | "Vigilancia" | "Inestable";
@@ -114,26 +115,26 @@ export const DISEASES: Disease[] = [
     summary:
       "Las aurículas se activan de forma caótica y pierden su contracción coordinada.",
     heartLesson:
-      "Mira el temblor auricular de baja amplitud y cómo los ventrículos dejan de contraerse a intervalos regulares.",
+      "Las aurículas pierden su contracción útil y muestran actividad fibrilatoria fina. Los ventrículos siguen contrayéndose de forma coordinada, pero a intervalos y con una fuerza variables.",
     ecgLesson:
-      "Busca intervalos R–R irregulares y la ausencia de ondas P repetibles.",
+      "Busca tres claves juntas: intervalos R–R sin patrón repetitivo, ausencia de ondas P definidas y una línea de base con ondas fibrilatorias finas, más visibles en V2.",
     causalLesson:
-      "La respuesta ventricular rápida acorta el llenado. La fiebre puede elevar la frecuencia, pero no crea por sí sola una FA.",
+      "El nodo AV filtra la activación auricular caótica. Cada intervalo de llenado es distinto: un R–R corto suele producir un latido más débil; una respuesta rápida reduce aún más el llenado.",
     caveat:
-      "El patrón mostrado es representativo. La confirmación clínica requiere un ECG interpretable por profesionales.",
+      "La FA no tiene una ‘severidad eléctrica’ lineal. Este escenario separa frecuencia ventricular e impacto hemodinámico; el diagnóstico real requiere documentar el ritmo en un ECG.",
     rhythmLabel: "Irregularmente irregular",
-    qrsLabel: "Estrecho variable",
+    qrsLabel: "Habitualmente estrecho",
     stLabel: "Sin patrón específico",
-    mechanicalLoss: 0.18,
+    mechanicalLoss: 0,
     progressionRate: 0.04,
     timeUnit: "meses",
     specific: {
-      label: "Irregularidad ventricular",
-      min: 20,
-      max: 100,
+      label: "Respuesta ventricular media",
+      min: 45,
+      max: 180,
       step: 1,
-      defaultValue: 58,
-      unit: "%",
+      defaultValue: 96,
+      unit: "lpm",
     },
   },
   {
@@ -498,7 +499,10 @@ export function deriveSimulation(
   );
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
-  const startingSeverity = baseSeverity * (0.76 + specificLoad * 0.24);
+  const startingSeverity =
+    disease.id === "afib"
+      ? baseSeverity
+      : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression = clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
   const severity01 = severity / 100;
@@ -508,7 +512,7 @@ export function deriveSimulation(
   let heartRate = vitals.heartRate + feverRate + hypoxiaRate;
 
   if (disease.id === "afib") {
-    heartRate = Math.max(heartRate, 64 + severity * 0.68);
+    heartRate = specificValue + feverRate + hypoxiaRate;
   } else if (disease.id === "vt") {
     heartRate = specificValue;
   } else if (disease.id === "av-block") {
@@ -517,6 +521,11 @@ export function deriveSimulation(
   heartRate = clamp(Math.round(heartRate), 28, 220);
 
   let contractility = clamp(1 - disease.mechanicalLoss * severity01, 0.18, 1);
+  if (disease.id === "afib") {
+    // AF primarily removes atrial contribution and varies preload beat to beat;
+    // it does not inherently weaken ventricular myocardial contractility.
+    contractility = 1;
+  }
   if (disease.id === "hcm") {
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
   }
@@ -533,7 +542,7 @@ export function deriveSimulation(
     heartRate > 130 ? clamp(1 - (heartRate - 130) / 210, 0.5, 1) : 1;
   const rhythmPenalty =
     disease.id === "afib"
-      ? 1 - severity01 * 0.12
+      ? 0.95 - severity01 * 0.1
       : disease.id === "vt"
         ? 1 - severity01 * 0.32
         : disease.id === "av-block"
@@ -565,6 +574,9 @@ export function deriveSimulation(
     16,
     76,
   );
+  if (disease.id === "afib") {
+    ejectionFraction = clamp(64 - pressureLoad * 3, 56, 68);
+  }
   if (disease.id === "heart-failure") {
     ejectionFraction = clamp(
       specificValue - progression * 0.18,
@@ -620,6 +632,7 @@ export function deriveSimulation(
     cardiacOutput,
     ejectionFraction,
     contractility,
+    rhythmIrregularity: disease.id === "afib" ? 0.78 : 0,
     riskIndex,
     riskMultiplier,
     stability,
