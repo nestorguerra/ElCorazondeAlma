@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { getAfibBeat } from "./afibModel";
 import type { HeartMotionTelemetry } from "./heartMotion";
 import type { Disease, DerivedSimulation, EcgPattern } from "./simulation";
-
-type Lead = "DII" | "V2" | "V5";
+import { vtEcgValue, type EcgLead as Lead } from "./vtModel";
 
 type EcgMonitorProps = {
   disease: Disease;
@@ -90,6 +89,7 @@ function ecgValue(
   time: number,
   pattern: EcgPattern,
   heartRate: number,
+  atrialRate: number,
   severity: number,
   lead: Lead,
   healthy = false,
@@ -106,11 +106,7 @@ function ecgValue(
   if (healthy) return baseWave(phase, lead) * 0.82;
 
   if (pattern === "vt") {
-    const qrs =
-      1.02 * gaussian(phase, 0.27, 0.055) -
-      0.82 * gaussian(phase, 0.4, 0.07) +
-      0.36 * gaussian(phase, 0.59, 0.1);
-    return qrs * (0.78 + severity01 * 0.35) * modifier;
+    return vtEcgValue(time, heartRate, atrialRate, lead);
   }
 
   if (pattern === "afib") {
@@ -234,6 +230,7 @@ export function EcgMonitor({
           sampleTime,
           disease.pattern,
           simulation.heartRate,
+          simulation.atrialRate,
           simulation.severity,
           lead,
           healthy,
@@ -257,7 +254,7 @@ export function EcgMonitor({
       lastFrameRef.current = timestamp;
       if (!paused && document.visibilityState === "visible") {
         timeRef.current += delta;
-        if (disease.id === "afib" && !reducedMotion) {
+        if ((disease.id === "afib" || disease.id === "vt") && !reducedMotion) {
           timeRef.current =
             (motionTelemetry.rhythmPosition * 60) /
             Math.max(28, simulation.heartRate);

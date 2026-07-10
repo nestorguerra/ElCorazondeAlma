@@ -40,6 +40,8 @@ type NumericUniform = { value: number };
 
 type HeartMotionUniforms = {
   uTime: NumericUniform;
+  uCyclePhase: NumericUniform;
+  uVtMode: NumericUniform;
   uVentricularSystole: NumericUniform;
   uAtrialSystole: NumericUniform;
   uContractility: NumericUniform;
@@ -54,6 +56,8 @@ type HeartMotionUniforms = {
 function createHeartMotionUniforms(): HeartMotionUniforms {
   return {
     uTime: { value: 0 },
+    uCyclePhase: { value: 0 },
+    uVtMode: { value: 0 },
     uVentricularSystole: { value: 0 },
     uAtrialSystole: { value: 0 },
     uContractility: { value: 1 },
@@ -77,6 +81,8 @@ function addRegionalHeartMotion(
         "#include <common>",
         `#include <common>
 uniform float uTime;
+uniform float uCyclePhase;
+uniform float uVtMode;
 uniform float uVentricularSystole;
 uniform float uAtrialSystole;
 uniform float uContractility;
@@ -106,7 +112,19 @@ float localContractility = mix(
   1.0 - uRegionalDysfunction,
   regionalMask
 );
-float ventricularForce = uVentricularSystole * uContractility *
+float vtActivationDelay = 0.015 +
+  smoothstep(-0.58, 0.64, position.x) *
+  (0.055 + uDyssynchrony * 0.085) +
+  (1.0 - apexBias) * 0.018;
+float localVtPhase = uCyclePhase - vtActivationDelay;
+float localVtPulse = smoothstep(0.0, 0.09, localVtPhase) *
+  (1.0 - smoothstep(0.34, 0.6, localVtPhase));
+float ventricularActivation = mix(
+  uVentricularSystole,
+  localVtPulse,
+  uVtMode
+);
+float ventricularForce = ventricularActivation * uContractility *
   localContractility * ventricularMask;
 float radialCompression = ventricularForce * (0.052 + apexBias * 0.034);
 transformed.xz *= 1.0 - radialCompression;
@@ -132,13 +150,12 @@ float atrialRipple = sin(
 transformed += radialDirection * atrialRipple *
   uAtrialFlutter * atrialMask * 0.0042;
 
-float ventricularRipple = sin(
-  uTime * 19.0 + position.y * 43.0 + position.x * 34.0
-) * uDyssynchrony * ventricularMask;
-transformed += radialDirection * ventricularRipple * 0.009;`,
+float activationSide = smoothstep(-0.58, 0.64, position.x) * 2.0 - 1.0;
+transformed.x += activationSide * localVtPulse * uDyssynchrony *
+  uVtMode * ventricularMask * 0.008;`,
       );
   };
-  material.customProgramCacheKey = () => "regional-heart-motion-v2";
+  material.customProgramCacheKey = () => "regional-heart-motion-v3";
   material.needsUpdate = true;
 }
 
@@ -605,6 +622,7 @@ function HeartModel({
   const ventricularAssembly = useRef<THREE.Group>(null);
   const atrialAssembly = useRef<THREE.Group>(null);
   const afibElectricalActivity = useRef<THREE.Group>(null);
+  const vtFocus = useRef<THREE.Group>(null);
   const coronaryLayer = useRef<THREE.Group>(null);
   const posteriorCoronaryLayer = useRef<THREE.Group>(null);
   const conductionLayer = useRef<THREE.Group>(null);
@@ -679,6 +697,7 @@ function HeartModel({
       contractility: simulation.contractility,
     });
     motionUniforms.current.uContractility.value = simulation.contractility;
+    motionUniforms.current.uVtMode.value = disease.id === "vt" ? 1 : 0;
     motionUniforms.current.uTwist.value = calibration.twist;
     motionUniforms.current.uAtrialFlutter.value = calibration.atrialFlutter;
     motionUniforms.current.uDyssynchrony.value = calibration.dyssynchrony;
@@ -773,6 +792,7 @@ function HeartModel({
       motionUniforms.current.uAtrialSystole.value = 0;
       motionUniforms.current.uAtrialFlutter.value = 0;
       motionUniforms.current.uDyssynchrony.value = 0;
+      motionUniforms.current.uVtMode.value = 0;
       Object.assign(motionTelemetry, {
         atrial: 0,
         ventricular: 0,
@@ -809,6 +829,10 @@ function HeartModel({
     phase.current += (delta * simulation.heartRate) / 60;
 
     const cycle = phase.current;
+    const atrialCycle =
+      disease.id === "vt"
+        ? (cycle * simulation.atrialRate) / simulation.heartRate
+        : cycle;
     const afibBeat =
       disease.id === "afib"
         ? getAfibBeat(cycle, simulation.rhythmIrregularity)
@@ -825,16 +849,12 @@ function HeartModel({
       severity,
       contractility: simulation.contractility,
       ventricularStrength,
+      atrialPhase: disease.id === "vt" ? atrialCycle : undefined,
     });
     const ventricularSystole = motion.ventricular;
     const atrialSystole = motion.atrial;
     const skipped = motion.skipped;
     const amplitude = 0.038 + simulation.contractility * 0.05;
-    const vtShake =
-      disease.id === "vt"
-        ? Math.sin(state.clock.elapsedTime * 18) * 0.012 * severity
-        : 0;
-
     Object.assign(motionTelemetry, {
       phase: motion.phase,
       rhythmPosition: cycle,
@@ -842,6 +862,7 @@ function HeartModel({
       rrIntervalMs: afibBeat
         ? afibRrIntervalMs(afibBeat.interval, simulation.heartRate)
         : 60_000 / simulation.heartRate,
+      atrialRate: simulation.atrialRate,
       ventricularStrength,
       atrial: motion.atrial,
       ventricular: motion.ventricular,
@@ -851,6 +872,8 @@ function HeartModel({
     });
 
     motionUniforms.current.uTime.value = state.clock.elapsedTime;
+    motionUniforms.current.uCyclePhase.value = motion.phase;
+    motionUniforms.current.uVtMode.value = disease.id === "vt" ? 1 : 0;
     motionUniforms.current.uVentricularSystole.value = ventricularSystole;
     motionUniforms.current.uAtrialSystole.value = atrialSystole;
     motionUniforms.current.uContractility.value = simulation.contractility;
@@ -865,14 +888,14 @@ function HeartModel({
       const dilatedY = 1 + dilation * 0.18;
       const dilatedZ = 1 + dilation * 0.25;
       ventricularAssembly.current.scale.set(
-        dilatedX * (1 + vtShake * 0.35),
+        dilatedX,
         dilatedY,
-        dilatedZ * (1 - vtShake * 0.24),
+        dilatedZ,
       );
       ventricularAssembly.current.position.y = ventricularSystole * 0.012;
       ventricularAssembly.current.rotation.y =
         -ventricularSystole * 0.006 * simulation.contractility;
-      ventricularAssembly.current.rotation.z = vtShake * 0.35;
+      ventricularAssembly.current.rotation.z = 0;
     }
 
     [coronaryLayer.current, posteriorCoronaryLayer.current].forEach(
@@ -935,6 +958,18 @@ function HeartModel({
       });
     }
 
+    if (vtFocus.current) {
+      const focusPulse = Math.exp(
+        -0.5 * Math.pow((motion.phase - 0.035) / 0.055, 2),
+      );
+      vtFocus.current.scale.setScalar(0.7 + focusPulse * 0.55);
+      vtFocus.current.children.forEach((child) => {
+        const material = (child as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        if (material) material.opacity = 0.24 + focusPulse * 0.7;
+      });
+    }
+
     if (greatVessels.current) {
       greatVessels.current.position.y = ventricularSystole * 0.022;
       greatVessels.current.scale.set(
@@ -945,7 +980,7 @@ function HeartModel({
     }
 
     if (root.current) {
-      root.current.rotation.z = -0.035 + vtShake * 0.22;
+      root.current.rotation.z = -0.035;
     }
 
     if (lesionPatch.current) {
@@ -988,16 +1023,23 @@ function HeartModel({
     }
 
     if (electricPulse.current) {
-      let progress = motion.phase;
-      if (disease.id === "av-block" && progress > 0.43 && skipped) {
-        progress = 0.43;
+      if (disease.id === "vt") {
+        electricPulse.current.position.set(0.58, -0.24, 1.08);
+        electricPulse.current.scale.setScalar(
+          0.58 + ventricularSystole * 0.7,
+        );
+      } else {
+        let progress = motion.phase;
+        if (disease.id === "av-block" && progress > 0.43 && skipped) {
+          progress = 0.43;
+        }
+        electricPulse.current.position.copy(
+          conductionCurve.getPointAt(progress),
+        );
+        electricPulse.current.scale.setScalar(
+          0.76 + Math.sin(state.clock.elapsedTime * 12) * 0.14,
+        );
       }
-      electricPulse.current.position.copy(
-        conductionCurve.getPointAt(progress),
-      );
-      electricPulse.current.scale.setScalar(
-        0.76 + Math.sin(state.clock.elapsedTime * 12) * 0.14,
-      );
     }
   });
 
@@ -1014,6 +1056,31 @@ function HeartModel({
           scale={[4.5, 4.5, 4.5]}
           rotation={[0, Math.PI, 0]}
         />
+
+        {disease.id === "vt" && (
+          <group ref={vtFocus} position={[0.58, -0.24, 1.08]}>
+            <mesh>
+              <sphereGeometry args={[0.07, 20, 14]} />
+              <meshBasicMaterial
+                color={activeColor}
+                transparent
+                opacity={0.72}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+              />
+            </mesh>
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[0.13, 0.018, 14, 48]} />
+              <meshBasicMaterial
+                color={activeColor}
+                transparent
+                opacity={0.5}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+              />
+            </mesh>
+          </group>
+        )}
 
         {region === "septum" && (
           <mesh
@@ -1071,13 +1138,13 @@ function HeartModel({
         <mesh ref={electricPulse}>
           <sphereGeometry args={[0.062, 18, 14]} />
           <meshBasicMaterial
-            color={nodeActive ? activeColor : "#9bfff0"}
+            color={nodeActive || disease.id === "vt" ? activeColor : "#9bfff0"}
             transparent
-            opacity={nodeActive ? 1 : 0.2}
+            opacity={nodeActive || disease.id === "vt" ? 1 : 0.2}
           />
           <pointLight
-            color={nodeActive ? activeColor : "#65ffe7"}
-            intensity={nodeActive ? 2.2 : 0.8}
+            color={nodeActive || disease.id === "vt" ? activeColor : "#65ffe7"}
+            intensity={nodeActive || disease.id === "vt" ? 2.2 : 0.8}
             distance={1.1}
           />
         </mesh>

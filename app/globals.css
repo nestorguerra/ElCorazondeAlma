@@ -679,7 +679,7 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
 }
 
-.afib-motion-readout {
+.rhythm-motion-readout {
   display: flex;
   align-items: center;
   justify-content: space-between;

@@ -7,6 +7,7 @@ export type HeartMotionTelemetry = {
   rhythmPosition: number;
   beatIndex: number;
   rrIntervalMs: number;
+  atrialRate: number;
   ventricularStrength: number;
   atrial: number;
   ventricular: number;
@@ -22,6 +23,7 @@ type MotionInput = {
   severity: number;
   contractility: number;
   ventricularStrength?: number;
+  atrialPhase?: number;
 };
 
 export type CardiacMotion = HeartMotionTelemetry & {
@@ -51,6 +53,7 @@ export const createHeartMotionTelemetry = (): HeartMotionTelemetry => ({
   rhythmPosition: 0,
   beatIndex: 0,
   rrIntervalMs: 0,
+  atrialRate: 0,
   ventricularStrength: 1,
   atrial: 0,
   ventricular: 0,
@@ -66,6 +69,7 @@ export function computeCardiacMotion({
   severity,
   contractility,
   ventricularStrength = 1,
+  atrialPhase,
 }: MotionInput): CardiacMotion {
   const normalizedPhase = ((phase % 1) + 1) % 1;
   const normalizedSeverity = clamp(severity);
@@ -82,8 +86,12 @@ export function computeCardiacMotion({
     ? 0
     : coordinatedVentricular * clamp(ventricularStrength, 0.7, 1.18);
 
+  const normalizedAtrialPhase =
+    atrialPhase === undefined
+      ? normalizedPhase
+      : ((atrialPhase % 1) + 1) % 1;
   const coordinatedAtrial = Math.pow(
-    cyclicPulse(normalizedPhase, 0.86, 0.145),
+    cyclicPulse(normalizedAtrialPhase, 0.86, 0.145),
     1.22,
   );
   const atrial = diseaseId === "afib" ? 0 : coordinatedAtrial;
@@ -101,6 +109,7 @@ export function computeCardiacMotion({
     rhythmPosition: normalizedPhase,
     beatIndex,
     rrIntervalMs: 0,
+    atrialRate: 0,
     ventricularStrength,
     atrial,
     ventricular,

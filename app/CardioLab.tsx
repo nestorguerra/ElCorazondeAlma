@@ -73,6 +73,10 @@ const SOURCES = [
     href: "https://academic.oup.com/eurheartj/article/45/36/3314/7738779",
   },
   {
+    label: "ESC 2022 · Arritmias ventriculares y muerte súbita",
+    href: "https://academic.oup.com/eurheartj/article/43/40/3997/6675633",
+  },
+  {
     label: "Echo Research & Practice · Variación latido a latido en FA",
     href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC5834126/",
   },
@@ -190,7 +194,7 @@ function severityLabel(value: number) {
 
 const MOTION_FOCUS: Record<DiseaseId, string> = {
   afib: "Sin contracción auricular útil · fuerza ventricular variable",
-  vt: "Ventrículos: contracción rápida y descoordinada",
+  vt: "Activación ventricular retardada · aurículas independientes",
   "av-block": "Algunos impulsos no activan los ventrículos",
   ischemia: "Pared anterior: contracción debilitada",
   infarction: "Territorio anterior y apical: movimiento muy reducido",
@@ -219,13 +223,14 @@ function CardiacMotionGuide({
   reducedMotion: boolean;
 }) {
   const [stage, setStage] = useState<CardiacStage>(telemetry.stage);
-  const [afibBeat, setAfibBeat] = useState({
+  const [rhythmBeat, setRhythmBeat] = useState({
     beatIndex: telemetry.beatIndex,
     rrIntervalMs: telemetry.rrIntervalMs,
     ventricularStrength: telemetry.ventricularStrength,
+    atrialRate: telemetry.atrialRate,
   });
   const lastStage = useRef<CardiacStage>(telemetry.stage);
-  const lastBeat = useRef(telemetry.beatIndex);
+  const lastBeat = useRef(Number.NaN);
 
   useEffect(() => {
     let frame = 0;
@@ -234,12 +239,16 @@ function CardiacMotionGuide({
         lastStage.current = telemetry.stage;
         setStage(telemetry.stage);
       }
-      if (disease.id === "afib" && telemetry.beatIndex !== lastBeat.current) {
+      if (
+        (disease.id === "afib" || disease.id === "vt") &&
+        telemetry.beatIndex !== lastBeat.current
+      ) {
         lastBeat.current = telemetry.beatIndex;
-        setAfibBeat({
+        setRhythmBeat({
           beatIndex: telemetry.beatIndex,
           rrIntervalMs: telemetry.rrIntervalMs,
           ventricularStrength: telemetry.ventricularStrength,
+          atrialRate: telemetry.atrialRate,
         });
       }
       frame = window.requestAnimationFrame(update);
@@ -271,9 +280,15 @@ function CardiacMotionGuide({
       </div>
       <strong>{movementPaused ? "Movimiento pausado" : MOTION_FOCUS[disease.id]}</strong>
       {disease.id === "afib" && !movementPaused && (
-        <span className="afib-motion-readout">
-          <span>R–R {Math.round(afibBeat.rrIntervalMs)} ms</span>
-          <span>Fuerza {Math.round(afibBeat.ventricularStrength * 100)}%</span>
+        <span className="rhythm-motion-readout">
+          <span>R–R {Math.round(rhythmBeat.rrIntervalMs)} ms</span>
+          <span>Fuerza {Math.round(rhythmBeat.ventricularStrength * 100)}%</span>
+        </span>
+      )}
+      {disease.id === "vt" && !movementPaused && (
+        <span className="rhythm-motion-readout">
+          <span>Aurículas {Math.round(rhythmBeat.atrialRate)} lpm</span>
+          <span>Ventrículos {Math.round(60_000 / Math.max(1, rhythmBeat.rrIntervalMs))} lpm</span>
         </span>
       )}
     </div>
@@ -459,14 +474,24 @@ export default function CardioLab() {
         <div className="vital-grid">
           <VitalControl
             icon={<HeartPulse size={17} />}
-            label={disease.id === "afib" ? "Respuesta ventricular media" : "FC basal"}
+            label={
+              disease.id === "afib"
+                ? "Respuesta ventricular media"
+                : disease.id === "vt"
+                  ? "Frecuencia auricular"
+                  : "FC basal"
+            }
             value={vitals.heartRate}
             min={40}
             max={160}
             step={1}
             unit="lpm"
             onChange={(value) => setVital("heartRate", value)}
-            hint={`Actual: ${simulation.heartRate} lpm`}
+            hint={
+              disease.id === "vt"
+                ? `Auricular actual: ${simulation.atrialRate} lpm`
+                : `Actual: ${simulation.heartRate} lpm`
+            }
           />
           <VitalControl
             icon={<Thermometer size={17} />}
@@ -556,7 +581,7 @@ export default function CardioLab() {
 
           <div className="metric-ribbon" aria-label="Métricas hemodinámicas calculadas">
             <div>
-              <span>Frecuencia</span>
+              <span>{disease.id === "vt" ? "Frecuencia ventricular" : "Frecuencia"}</span>
               <strong>{simulation.heartRate}</strong>
               <small>lpm</small>
             </div>
@@ -793,7 +818,11 @@ export default function CardioLab() {
 
           <label className="inspector-slider">
             <span className="inspector-slider-head">
-              <span>{disease.id === "afib" ? "Impacto hemodinámico inicial" : "Severidad inicial"}</span>
+              <span>
+                {disease.id === "afib" || disease.id === "vt"
+                  ? "Impacto hemodinámico inicial"
+                  : "Severidad inicial"}
+              </span>
               <strong>{Math.round(baseSeverity)}% · {severityLabel(baseSeverity)}</strong>
             </span>
             <input
@@ -827,11 +856,17 @@ export default function CardioLab() {
           </label>
 
           <div className="inspector-result">
-            <span>{disease.id === "afib" ? "Compromiso hemodinámico simulado" : "Resultado simulado"}</span>
+            <span>
+              {disease.id === "afib" || disease.id === "vt"
+                ? "Compromiso hemodinámico simulado"
+                : "Resultado simulado"}
+            </span>
             <strong>{Math.round(simulation.severity)}%</strong>
             <small>
               {disease.id === "afib"
                 ? "impacto basal + tiempo + modificadores; no mide ‘cantidad de fibrilación’"
+                : disease.id === "vt"
+                  ? "impacto basal + frecuencia ventricular + tiempo + modificadores"
                 : "base + variable propia + tiempo + modificadores"}
             </small>
           </div>

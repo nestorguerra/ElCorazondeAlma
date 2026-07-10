@@ -77,6 +77,7 @@ export type Vitals = {
 export type DerivedSimulation = {
   severity: number;
   heartRate: number;
+  atrialRate: number;
   map: number;
   currentSystolic: number;
   currentDiastolic: number;
@@ -140,26 +141,26 @@ export const DISEASES: Disease[] = [
   {
     id: "vt",
     code: "TV",
-    name: "Taquicardia ventricular",
+    name: "Taquicardia ventricular monomórfica",
     family: "Ritmo",
     color: "#ff665f",
     region: "ventricles",
-    regionLabel: "ambos ventrículos",
+    regionLabel: "foco en VD · activación de ambos ventrículos",
     pattern: "vt",
     summary:
-      "Los ventrículos toman el control con un ritmo rápido y poco eficaz.",
+      "Un foco o circuito ventricular genera una taquicardia sostenida con la misma morfología QRS en cada latido.",
     heartLesson:
-      "Observa la contracción ventricular acelerada, el llenado reducido y la pérdida de volumen expulsado.",
+      "Observa cómo la activación nace en un ventrículo y alcanza tarde otras paredes: la contracción es rápida, regionalmente desfasada y deja poco tiempo de llenado.",
     ecgLesson:
-      "Busca una taquicardia regular con complejos QRS anchos y repetitivos.",
+      "Busca una taquicardia regular con QRS anchos e idénticos, ST–T discordante y pequeñas ondas P que mantienen un ritmo independiente.",
     causalLesson:
-      "Cuanto más rápida es la frecuencia, menos tiempo queda para el llenado y más puede caer el gasto cardíaco.",
+      "La activación se propaga lentamente de célula a célula fuera del sistema His–Purkinje. El QRS se ensancha, las paredes se contraen en momentos distintos y la frecuencia alta acorta la diástole.",
     caveat:
-      "Escenario de emergencia. No toda taquicardia de QRS ancho es necesariamente ventricular.",
-    rhythmLabel: "Regular, ventricular",
-    qrsLabel: "Ancho >120 ms",
-    stLabel: "No valorable",
-    mechanicalLoss: 0.54,
+      "Representa una TV monomórfica sostenida con patrón tipo BRI. No toda taquicardia de QRS ancho es ventricular y la estabilidad no puede inferirse solo por la frecuencia.",
+    rhythmLabel: "Regular · disociación AV",
+    qrsLabel: "Monomórfico · ≈160 ms",
+    stLabel: "Discordancia secundaria",
+    mechanicalLoss: 0.32,
     progressionRate: 0.28,
     timeUnit: "min",
     specific: {
@@ -502,7 +503,9 @@ export function deriveSimulation(
   const startingSeverity =
     disease.id === "afib"
       ? baseSeverity
-      : baseSeverity * (0.76 + specificLoad * 0.24);
+      : disease.id === "vt"
+        ? clamp(baseSeverity + (specificLoad - 0.45) * 18, 0, 100)
+        : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression = clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
   const severity01 = severity / 100;
@@ -510,6 +513,11 @@ export function deriveSimulation(
   const feverRate = Math.max(0, vitals.temperature - 37) * 7;
   const hypoxiaRate = Math.max(0, 94 - vitals.spo2) * 0.9;
   let heartRate = vitals.heartRate + feverRate + hypoxiaRate;
+  const atrialRate = clamp(
+    Math.round(vitals.heartRate + feverRate),
+    40,
+    130,
+  );
 
   if (disease.id === "afib") {
     heartRate = vitals.heartRate + feverRate + hypoxiaRate;
@@ -526,6 +534,11 @@ export function deriveSimulation(
     // it does not inherently weaken ventricular myocardial contractility.
     contractility = 1;
   }
+  if (disease.id === "vt") {
+    // The myocardium may retain intrinsic force; acute pump loss comes mainly
+    // from rapid filling, abnormal activation and mechanical dyssynchrony.
+    contractility = clamp(1 - severity01 * 0.18, 0.72, 1);
+  }
   if (disease.id === "hcm") {
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
   }
@@ -539,12 +552,16 @@ export function deriveSimulation(
     1.04,
   );
   const fillingPenalty =
-    heartRate > 130 ? clamp(1 - (heartRate - 130) / 210, 0.5, 1) : 1;
+    disease.id === "vt"
+      ? clamp(1 - Math.max(0, heartRate - 110) / 180, 0.35, 1)
+      : heartRate > 130
+        ? clamp(1 - (heartRate - 130) / 210, 0.5, 1)
+        : 1;
   const rhythmPenalty =
     disease.id === "afib"
       ? 0.95 - severity01 * 0.1
       : disease.id === "vt"
-        ? 1 - severity01 * 0.32
+        ? 1 - severity01 * 0.22
         : disease.id === "av-block"
           ? 1 - severity01 * 0.08
           : 1;
@@ -576,6 +593,13 @@ export function deriveSimulation(
   );
   if (disease.id === "afib") {
     ejectionFraction = clamp(64 - pressureLoad * 3, 56, 68);
+  }
+  if (disease.id === "vt") {
+    ejectionFraction = clamp(
+      61 - severity01 * 18 - Math.max(0, heartRate - 140) * 0.07,
+      26,
+      62,
+    );
   }
   if (disease.id === "heart-failure") {
     ejectionFraction = clamp(
@@ -617,7 +641,12 @@ export function deriveSimulation(
   if (currentSystolic < 90 || cardiacOutput < 2.6 || (disease.id === "vt" && severity > 62)) {
     stability = "Inestable";
     stabilityTone = "danger";
-  } else if (currentSystolic < 102 || cardiacOutput < 3.8 || severity > 72) {
+  } else if (
+    disease.id === "vt" ||
+    currentSystolic < 102 ||
+    cardiacOutput < 3.8 ||
+    severity > 72
+  ) {
     stability = "Vigilancia";
     stabilityTone = "watch";
   }
@@ -625,6 +654,7 @@ export function deriveSimulation(
   return {
     severity,
     heartRate,
+    atrialRate,
     map,
     currentSystolic,
     currentDiastolic,
