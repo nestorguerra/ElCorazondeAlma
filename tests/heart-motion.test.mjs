@@ -80,15 +80,47 @@ test("keeps intrinsic ventricular contractility and EF while AF removes atrial c
     DEFAULT_VITALS,
     getDisease("afib"),
     44,
-    96,
+    70,
     0,
   );
 
-  assert.equal(simulation.heartRate, 96);
+  assert.equal(simulation.heartRate, DEFAULT_VITALS.heartRate);
   assert.equal(simulation.contractility, 1);
   assert.ok(simulation.ejectionFraction >= 60);
-  assert.equal(simulation.rhythmIrregularity, 0.78);
+  assert.equal(simulation.rhythmIrregularity, 0.7);
   assert.ok(simulation.strokeVolume < 74);
+});
+
+test("separates AF mean ventricular rate from didactic R-R variability", () => {
+  const fastVitals = { ...DEFAULT_VITALS, heartRate: 132 };
+  const lowVariability = deriveSimulation(
+    fastVitals,
+    getDisease("afib"),
+    44,
+    35,
+    0,
+  );
+  const highVariability = deriveSimulation(
+    fastVitals,
+    getDisease("afib"),
+    44,
+    90,
+    0,
+  );
+
+  assert.equal(lowVariability.heartRate, 132);
+  assert.equal(highVariability.heartRate, 132);
+  assert.equal(lowVariability.rhythmIrregularity, 0.35);
+  assert.equal(highVariability.rhythmIrregularity, 0.9);
+
+  const lowIntervals = [];
+  const highIntervals = [];
+  for (let index = 0; index < 16; index += 1) {
+    lowIntervals.push(getAfibBeat(index + 0.4, 0.35).interval);
+    highIntervals.push(getAfibBeat(index + 0.4, 0.9).interval);
+  }
+  const spread = (values) => Math.max(...values) - Math.min(...values);
+  assert.ok(spread(highIntervals) > spread(lowIntervals));
 });
 
 test("deforms the anatomical mesh regionally and keeps surface vessels moving", async () => {
@@ -116,6 +148,8 @@ test("renders AF ECG without P waves and with calibrated paper spacing", async (
 
   assert.match(source, /secondsSinceBeat/);
   assert.match(source, /fibrillatoryBaseline/);
+  assert.match(source, /simulation\.rhythmIrregularity/);
+  assert.match(source, /!reducedMotion/);
   assert.match(source, /Ausentes · ondas f/);
   assert.match(source, /horizontalSmallBox.*0\.04/s);
   assert.doesNotMatch(source, /irregularWarp/);

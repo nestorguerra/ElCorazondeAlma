@@ -129,12 +129,12 @@ export const DISEASES: Disease[] = [
     progressionRate: 0.04,
     timeUnit: "meses",
     specific: {
-      label: "Respuesta ventricular media",
-      min: 45,
-      max: 180,
+      label: "Variabilidad R–R (didáctica)",
+      min: 35,
+      max: 90,
       step: 1,
-      defaultValue: 96,
-      unit: "lpm",
+      defaultValue: 70,
+      unit: "%",
     },
   },
   {
@@ -512,7 +512,7 @@ export function deriveSimulation(
   let heartRate = vitals.heartRate + feverRate + hypoxiaRate;
 
   if (disease.id === "afib") {
-    heartRate = specificValue + feverRate + hypoxiaRate;
+    heartRate = vitals.heartRate + feverRate + hypoxiaRate;
   } else if (disease.id === "vt") {
     heartRate = specificValue;
   } else if (disease.id === "av-block") {
@@ -632,7 +632,8 @@ export function deriveSimulation(
     cardiacOutput,
     ejectionFraction,
     contractility,
-    rhythmIrregularity: disease.id === "afib" ? 0.78 : 0,
+    rhythmIrregularity:
+      disease.id === "afib" ? clamp(specificValue / 100, 0.35, 0.9) : 0,
     riskIndex,
     riskMultiplier,
     stability,

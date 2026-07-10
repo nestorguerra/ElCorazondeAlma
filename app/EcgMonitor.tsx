@@ -13,6 +13,7 @@ type EcgMonitorProps = {
   paused: boolean;
   compareHealthy: boolean;
   motionTelemetry: HeartMotionTelemetry;
+  reducedMotion: boolean;
 };
 
 function gaussian(x: number, center: number, width: number) {
@@ -92,6 +93,7 @@ function ecgValue(
   severity: number,
   lead: Lead,
   healthy = false,
+  rhythmIrregularity = 0.78,
 ) {
   const severity01 = healthy ? 0 : severity / 100;
   const safeRate = healthy ? 72 : heartRate;
@@ -112,7 +114,7 @@ function ecgValue(
   }
 
   if (pattern === "afib") {
-    return afibEcgValue(time, heartRate, lead);
+    return afibEcgValue(time, heartRate, lead, rhythmIrregularity);
   }
 
   if (pattern === "av-block") {
@@ -164,6 +166,7 @@ export function EcgMonitor({
   paused,
   compareHealthy,
   motionTelemetry,
+  reducedMotion,
 }: EcgMonitorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const timeRef = useRef(0);
@@ -234,6 +237,7 @@ export function EcgMonitor({
           simulation.severity,
           lead,
           healthy,
+          simulation.rhythmIrregularity,
         );
         const y = baseline - sample * amplitude;
         if (x === 0) context.moveTo(x, y);
@@ -253,7 +257,7 @@ export function EcgMonitor({
       lastFrameRef.current = timestamp;
       if (!paused && document.visibilityState === "visible") {
         timeRef.current += delta;
-        if (disease.id === "afib") {
+        if (disease.id === "afib" && !reducedMotion) {
           timeRef.current =
             (motionTelemetry.rhythmPosition * 60) /
             Math.max(28, simulation.heartRate);
@@ -281,7 +285,7 @@ export function EcgMonitor({
       observer.disconnect();
       lastFrameRef.current = null;
     };
-  }, [compareHealthy, disease, lead, motionTelemetry, paused, simulation.heartRate, simulation.severity]);
+  }, [compareHealthy, disease, lead, motionTelemetry, paused, reducedMotion, simulation]);
 
   return (
     <div className="ecg-module">

@@ -459,7 +459,7 @@ export default function CardioLab() {
         <div className="vital-grid">
           <VitalControl
             icon={<HeartPulse size={17} />}
-            label="FC basal"
+            label={disease.id === "afib" ? "Respuesta ventricular media" : "FC basal"}
             value={vitals.heartRate}
             min={40}
             max={160}
@@ -689,6 +689,7 @@ export default function CardioLab() {
             paused={paused}
             compareHealthy={compareHealthy}
             motionTelemetry={motionTelemetry}
+            reducedMotion={reducedMotion}
           />
 
           <div className="lesson-module">
