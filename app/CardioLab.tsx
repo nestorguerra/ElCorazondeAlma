@@ -63,6 +63,10 @@ type LessonTab = "heart" | "cause" | "caution";
 
 const SOURCES = [
   {
+    label: "NIH 3D · Base anatómica del corazón (3DPX-022787, dominio público)",
+    href: "https://3d.nih.gov/entries/3DPX-022787",
+  },
+  {
     label: "AHA · Qué mide un electrocardiograma",
     href: "https://www.heart.org/en/health-topics/heart-attack/diagnosing-a-heart-attack/electrocardiogram",
   },
@@ -195,10 +199,19 @@ export default function CardioLab() {
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (media.matches) {
+    const respectSystemPreference = () => {
+      if (!media.matches) return;
       setReducedMotion(true);
       setAutoRotate(false);
-    }
+    };
+    const timer = media.matches
+      ? window.setTimeout(respectSystemPreference, 0)
+      : undefined;
+    media.addEventListener("change", respectSystemPreference);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      media.removeEventListener("change", respectSystemPreference);
+    };
   }, []);
 
   useEffect(() => {
@@ -479,6 +492,11 @@ export default function CardioLab() {
               <span>Arrastra para girar · rueda para acercar</span>
             </div>
 
+            <div className="heart-detail-badge" aria-label="Malla anatómica de alta definición">
+              <span />
+              Malla anatómica · 150k triángulos
+            </div>
+
             <div className="heart-viewport-actions">
               <button
                 type="button"
@@ -728,7 +746,7 @@ export default function CardioLab() {
               </button>
             </div>
             <p>
-              La app traduce relaciones clínicas conocidas a una animación original y simplificada. No reproduce un paciente, no calcula riesgo individual y no genera ECG diagnósticos.
+              La app combina una malla anatómica de alta definición con capas visuales originales para mostrar movimiento, vasos y zonas afectadas. No reproduce un paciente, no calcula riesgo individual y no genera ECG diagnósticos.
             </p>
             <div className="source-list">
               {SOURCES.map((source) => (

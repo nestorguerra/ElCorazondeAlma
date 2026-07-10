@@ -1,8 +1,14 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
-import { ContactShadows, OrbitControls } from "@react-three/drei";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ContactShadows, OrbitControls, useGLTF } from "@react-three/drei";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import * as THREE from "three";
 import type { Disease, DerivedSimulation } from "./simulation";
 
@@ -24,10 +30,9 @@ type VesselDefinition = {
   opacity?: number;
 };
 
-const RED = "#ef3636";
-const RED_DARK = "#a51425";
-const VEIN_BLUE = "#325eb5";
-const VEIN_LIGHT = "#4f78cb";
+const subscribeToHydration = () => () => undefined;
+const clientMountedSnapshot = () => true;
+const serverMountedSnapshot = () => false;
 
 const CORONARY_VESSELS: VesselDefinition[] = [
   {
@@ -224,6 +229,124 @@ const CORONARY_VESSELS: VesselDefinition[] = [
   },
 ];
 
+const POSTERIOR_CORONARY_VESSELS: VesselDefinition[] = [
+  {
+    color: "#e42d35",
+    emissive: "#471015",
+    radius: 0.035,
+    points: [
+      [0.04, 0.78, -0.92],
+      [0.08, 0.39, -1.05],
+      [0.12, -0.08, -1.09],
+      [0.17, -0.58, -0.99],
+      [0.22, -1.11, -0.74],
+      [0.2, -1.48, -0.43],
+    ],
+  },
+  {
+    color: "#e53538",
+    emissive: "#471015",
+    radius: 0.03,
+    points: [
+      [-0.03, 0.76, -0.93],
+      [-0.38, 0.67, -0.95],
+      [-0.72, 0.48, -0.84],
+      [-0.94, 0.17, -0.64],
+      [-0.98, -0.13, -0.48],
+    ],
+  },
+  {
+    color: "#e53538",
+    emissive: "#471015",
+    radius: 0.024,
+    points: [
+      [0.08, 0.37, -1.05],
+      [0.39, 0.22, -1.02],
+      [0.66, -0.02, -0.88],
+      [0.84, -0.32, -0.68],
+    ],
+  },
+  {
+    color: "#e53538",
+    emissive: "#471015",
+    radius: 0.022,
+    points: [
+      [0.12, -0.18, -1.08],
+      [-0.17, -0.35, -1.02],
+      [-0.4, -0.61, -0.87],
+      [-0.52, -0.91, -0.66],
+    ],
+  },
+  {
+    color: "#e53538",
+    emissive: "#471015",
+    radius: 0.021,
+    points: [
+      [0.16, -0.54, -0.98],
+      [0.46, -0.67, -0.9],
+      [0.69, -0.88, -0.72],
+      [0.79, -1.12, -0.5],
+    ],
+  },
+  {
+    color: "#4168b4",
+    emissive: "#091632",
+    radius: 0.037,
+    points: [
+      [-0.1, 0.78, -0.96],
+      [-0.15, 0.39, -1.08],
+      [-0.14, -0.08, -1.1],
+      [-0.08, -0.56, -1.0],
+      [0.05, -1.03, -0.77],
+      [0.15, -1.39, -0.49],
+    ],
+  },
+  {
+    color: "#4168b4",
+    emissive: "#091632",
+    radius: 0.028,
+    points: [
+      [-0.15, 0.61, -1.01],
+      [-0.49, 0.55, -0.96],
+      [-0.77, 0.35, -0.82],
+      [-0.91, 0.08, -0.63],
+    ],
+  },
+  {
+    color: "#4168b4",
+    emissive: "#091632",
+    radius: 0.023,
+    points: [
+      [-0.14, 0.16, -1.09],
+      [0.16, 0.03, -1.1],
+      [0.44, -0.18, -0.99],
+      [0.62, -0.45, -0.82],
+    ],
+  },
+  {
+    color: "#4168b4",
+    emissive: "#091632",
+    radius: 0.021,
+    points: [
+      [-0.1, -0.39, -1.05],
+      [-0.34, -0.55, -0.97],
+      [-0.54, -0.79, -0.8],
+      [-0.62, -1.04, -0.58],
+    ],
+  },
+  {
+    color: "#4168b4",
+    emissive: "#091632",
+    radius: 0.019,
+    points: [
+      [-0.07, -0.7, -0.92],
+      [0.2, -0.84, -0.84],
+      [0.43, -1.05, -0.67],
+      [0.54, -1.28, -0.45],
+    ],
+  },
+];
+
 const CONDUCTION_VESSELS: VesselDefinition[] = [
   {
     color: "#63ead7",
@@ -241,71 +364,70 @@ const CONDUCTION_VESSELS: VesselDefinition[] = [
   },
 ];
 
-function createTissueTexture() {
-  const size = 96;
-  const data = new Uint8Array(size * size * 4);
-  let seed = 7919;
-  const random = () => {
-    seed = (seed * 48271) % 2147483647;
-    return seed / 2147483647;
-  };
-
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const index = (y * size + x) * 4;
-      const wave = Math.sin(x * 0.34 + Math.sin(y * 0.11)) * 9;
-      const grain = (random() - 0.5) * 26;
-      const value = Math.max(72, Math.min(190, 126 + wave + grain));
-      data[index] = value;
-      data[index + 1] = value;
-      data[index + 2] = value;
-      data[index + 3] = 255;
-    }
-  }
-
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3.2, 4.4);
-  texture.needsUpdate = true;
-  return texture;
-}
-
-function createVentricleGeometry(kind: "left" | "right") {
-  const geometry = new THREE.SphereGeometry(1, 88, 60);
-  const positions = geometry.attributes.position as THREE.BufferAttribute;
-
-  for (let index = 0; index < positions.count; index += 1) {
-    const originalX = positions.getX(index);
-    const originalY = positions.getY(index);
-    const originalZ = positions.getZ(index);
-    const height = (originalY + 1) / 2;
-    const lowerTaper = 0.58 + height * 0.42;
-    const shoulder = 1 + Math.sin(Math.PI * Math.min(1, height * 1.08)) * 0.12;
-    const topFlatten = originalY > 0.52 ? 0.52 + (originalY - 0.52) * 0.35 : originalY;
-
-    if (kind === "left") {
-      const x = originalX * 1.03 * lowerTaper * shoulder + 0.14 * (1 - height);
-      const y = topFlatten * 1.64 - 0.11;
-      const z = originalZ * 0.88 * (0.78 + height * 0.22) + 0.08 * (1 - originalY * originalY);
-      positions.setXYZ(index, x, y, z);
-    } else {
-      const x = originalX * 0.82 * lowerTaper - 0.05 * (1 - height);
-      const y = topFlatten * 1.35 + 0.02;
-      const z = originalZ * 0.64 + 0.15 * (1 - originalY * originalY);
-      positions.setXYZ(index, x, y, z);
-    }
-  }
-
-  positions.needsUpdate = true;
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
 function toCurve(points: Point3[]) {
   return new THREE.CatmullRomCurve3(
     points.map(([x, y, z]) => new THREE.Vector3(x, y, z)),
   );
+}
+
+function createTaperedTubeGeometry(
+  curve: THREE.Curve<THREE.Vector3>,
+  tubularSegments: number,
+  radius: number,
+  radialSegments: number,
+) {
+  const geometry = new THREE.BufferGeometry();
+  const frames = curve.computeFrenetFrames(tubularSegments, false);
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const point = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+
+  for (let segment = 0; segment <= tubularSegments; segment += 1) {
+    const t = segment / tubularSegments;
+    const taper = 0.24 + 0.76 * Math.pow(1 - t, 0.62);
+    const localRadius = radius * taper;
+    curve.getPointAt(t, point);
+
+    for (let side = 0; side < radialSegments; side += 1) {
+      const angle = (side / radialSegments) * Math.PI * 2;
+      normal
+        .copy(frames.normals[segment])
+        .multiplyScalar(Math.cos(angle))
+        .addScaledVector(frames.binormals[segment], Math.sin(angle))
+        .normalize();
+      positions.push(
+        point.x + normal.x * localRadius,
+        point.y + normal.y * localRadius,
+        point.z + normal.z * localRadius,
+      );
+      normals.push(normal.x, normal.y, normal.z);
+      uvs.push(t, side / radialSegments);
+    }
+  }
+
+  for (let segment = 0; segment < tubularSegments; segment += 1) {
+    for (let side = 0; side < radialSegments; side += 1) {
+      const nextSide = (side + 1) % radialSegments;
+      const a = segment * radialSegments + side;
+      const b = (segment + 1) * radialSegments + side;
+      const c = (segment + 1) * radialSegments + nextSide;
+      const d = segment * radialSegments + nextSide;
+      indices.push(a, b, d, b, c, d);
+    }
+  }
+
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 function AnatomicalTube({
@@ -317,60 +439,35 @@ function AnatomicalTube({
 }) {
   const geometry = useMemo(() => {
     const curve = toCurve(definition.points);
-    return new THREE.TubeGeometry(
+    return createTaperedTubeGeometry(
       curve,
-      Math.max(28, definition.points.length * 14),
+      Math.max(72, definition.points.length * 24),
       definition.radius,
-      definition.radius > 0.08 ? 24 : 12,
-      false,
+      definition.radius > 0.08 ? 32 : 18,
     );
   }, [definition]);
+
+  const vesselColor = useMemo(() => {
+    const color = new THREE.Color(definition.color);
+    color.offsetHSL(0, -0.08, -0.12);
+    return color;
+  }, [definition.color]);
 
   return (
     <mesh geometry={geometry} castShadow={definition.radius > 0.08}>
       <meshPhysicalMaterial
-        color={highlight ? "#ffad42" : definition.color}
+        color={highlight ? "#ffad42" : vesselColor}
         emissive={highlight ? "#ff7a19" : definition.emissive ?? "#000000"}
         emissiveIntensity={highlight ? 0.8 : definition.emissive ? 0.2 : 0}
-        roughness={definition.radius > 0.08 ? 0.34 : 0.48}
-        clearcoat={definition.radius > 0.08 ? 0.38 : 0.2}
+        roughness={definition.radius > 0.08 ? 0.35 : 0.46}
+        clearcoat={definition.radius > 0.08 ? 0.42 : 0.3}
+        clearcoatRoughness={0.28}
+        sheen={0.18}
+        sheenColor={new THREE.Color("#ffd7cf")}
         transparent={(definition.opacity ?? 1) < 1}
         opacity={definition.opacity ?? 1}
       />
     </mesh>
-  );
-}
-
-function VesselMouth({
-  position,
-  direction,
-  radius,
-  color,
-}: {
-  position: Point3;
-  direction: Point3;
-  radius: number;
-  color: string;
-}) {
-  const quaternion = useMemo(() => {
-    const normal = new THREE.Vector3(...direction).normalize();
-    return new THREE.Quaternion().setFromUnitVectors(
-      new THREE.Vector3(0, 0, 1),
-      normal,
-    );
-  }, [direction]);
-
-  return (
-    <group position={position} quaternion={quaternion}>
-      <mesh>
-        <torusGeometry args={[radius * 0.78, radius * 0.18, 14, 40]} />
-        <meshPhysicalMaterial color={color} roughness={0.3} clearcoat={0.4} />
-      </mesh>
-      <mesh position={[0, 0, -0.007]}>
-        <circleGeometry args={[radius * 0.67, 36]} />
-        <meshStandardMaterial color="#5e1017" roughness={0.92} />
-      </mesh>
-    </group>
   );
 }
 
@@ -382,8 +479,6 @@ function HeartModel({
 }: HeartSceneProps) {
   const root = useRef<THREE.Group>(null);
   const ventricularAssembly = useRef<THREE.Group>(null);
-  const leftVentricle = useRef<THREE.Mesh>(null);
-  const rightVentricle = useRef<THREE.Mesh>(null);
   const atrialAssembly = useRef<THREE.Group>(null);
   const greatVessels = useRef<THREE.Group>(null);
   const aorticFlow = useRef<THREE.Group>(null);
@@ -399,9 +494,91 @@ function HeartModel({
   const septalGrowth = disease.id === "hcm" ? severity * 0.35 : 0;
   const atrialGrowth = disease.id === "mitral-regurgitation" ? severity * 0.16 : 0;
 
-  const tissueTexture = useMemo(createTissueTexture, []);
-  const leftGeometry = useMemo(() => createVentricleGeometry("left"), []);
-  const rightGeometry = useMemo(() => createVentricleGeometry("right"), []);
+  const ventActive = [
+    "ventricles",
+    "left-ventricle",
+    "anterior-lv",
+    "septum",
+  ].includes(region);
+  const atriaActive = region === "atria" || region === "mitral-valve";
+  const valveAorticActive = region === "aortic-valve";
+  const valveMitralActive = region === "mitral-valve";
+  const nodeActive = region === "av-node";
+  const coronaryActive = region === "anterior-lv";
+
+  const { scene } = useGLTF("/models/heart-anatomy-high-detail.glb");
+  const anatomicalAsset = useMemo(() => {
+    const model = scene.clone(true);
+    const materials: THREE.MeshStandardMaterial[] = [];
+
+    model.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const source = object.material as THREE.MeshStandardMaterial;
+      const material = source.clone();
+      material.color.set("#ffffff");
+      material.roughness = 0.64;
+      material.metalness = 0.01;
+      material.emissive.set("#ffffff");
+      material.emissiveMap = source.map;
+      material.emissiveIntensity = 0.04;
+      material.normalScale.set(0.82, 0.82);
+      material.side = THREE.DoubleSide;
+      object.material = material;
+      object.castShadow = true;
+      object.receiveShadow = false;
+      materials.push(material);
+    });
+
+    return { model, materials };
+  }, [scene]);
+
+  const pericardialAsset = useMemo(() => {
+    const model = scene.clone(true);
+    const materials: THREE.MeshPhysicalMaterial[] = [];
+
+    model.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const material = new THREE.MeshPhysicalMaterial({
+        color: "#ff5f62",
+        emissive: "#ff3038",
+        emissiveIntensity: 0.35,
+        transparent: true,
+        opacity: 0.11,
+        roughness: 0.22,
+        clearcoat: 0.7,
+        clearcoatRoughness: 0.22,
+        transmission: 0.06,
+        depthWrite: false,
+        side: THREE.BackSide,
+      });
+      object.material = material;
+      materials.push(material);
+    });
+
+    return { model, materials };
+  }, [scene]);
+
+  useEffect(() => {
+    anatomicalAsset.materials.forEach((material) => {
+      material.emissive.set("#ffffff");
+      material.emissiveIntensity =
+        ventActive || atriaActive ? 0.055 + severity * 0.025 : 0.035;
+    });
+
+    pericardialAsset.materials.forEach((material) => {
+      material.color.set(activeColor);
+      material.emissive.set(activeColor);
+      material.opacity = 0.055 + severity * 0.11;
+      material.emissiveIntensity = 0.18 + severity * 0.42;
+    });
+  }, [
+    activeColor,
+    anatomicalAsset,
+    atriaActive,
+    pericardialAsset,
+    severity,
+    ventActive,
+  ]);
 
   const aortaDefinition = useMemo<VesselDefinition>(
     () => ({
@@ -420,118 +597,6 @@ function HeartModel({
     }),
     [],
   );
-  const aorticBranches = useMemo<VesselDefinition[]>(
-    () => [
-      {
-        color: "#df4142",
-        emissive: "#4a0b10",
-        radius: 0.14,
-        points: [
-          [-0.48, 2.05, -0.36],
-          [-0.55, 2.36, -0.35],
-          [-0.54, 2.72, -0.32],
-        ],
-      },
-      {
-        color: "#df4142",
-        emissive: "#4a0b10",
-        radius: 0.145,
-        points: [
-          [-0.08, 2.14, -0.37],
-          [0.0, 2.46, -0.33],
-          [0.09, 2.78, -0.27],
-        ],
-      },
-      {
-        color: "#df4142",
-        emissive: "#4a0b10",
-        radius: 0.13,
-        points: [
-          [0.26, 2.03, -0.34],
-          [0.47, 2.32, -0.28],
-          [0.68, 2.61, -0.18],
-        ],
-      },
-    ],
-    [],
-  );
-  const pulmonaryTrunk = useMemo<VesselDefinition>(
-    () => ({
-      color: VEIN_BLUE,
-      emissive: "#081538",
-      radius: 0.225,
-      points: [
-        [-0.38, 0.92, 0.23],
-        [-0.54, 1.37, 0.35],
-        [-0.35, 1.73, 0.43],
-        [0.08, 1.83, 0.43],
-        [0.48, 1.73, 0.38],
-        [0.85, 1.53, 0.27],
-      ],
-    }),
-    [],
-  );
-  const superiorVenaCava = useMemo<VesselDefinition>(
-    () => ({
-      color: VEIN_BLUE,
-      emissive: "#081538",
-      radius: 0.205,
-      points: [
-        [-0.86, 2.62, -0.12],
-        [-0.85, 2.2, -0.08],
-        [-0.81, 1.72, -0.02],
-        [-0.72, 1.23, 0.05],
-        [-0.59, 0.98, 0.08],
-      ],
-    }),
-    [],
-  );
-  const pulmonaryVeins = useMemo<VesselDefinition[]>(
-    () => [
-      {
-        color: "#dd4245",
-        emissive: "#4a0b10",
-        radius: 0.115,
-        points: [
-          [-0.64, 1.18, -0.28],
-          [-1.04, 1.26, -0.25],
-          [-1.3, 1.36, -0.18],
-        ],
-      },
-      {
-        color: "#dd4245",
-        emissive: "#4a0b10",
-        radius: 0.105,
-        points: [
-          [-0.62, 1.0, -0.23],
-          [-1.0, 0.98, -0.19],
-          [-1.28, 0.9, -0.1],
-        ],
-      },
-      {
-        color: "#dd4245",
-        emissive: "#4a0b10",
-        radius: 0.12,
-        points: [
-          [0.58, 1.2, -0.25],
-          [0.94, 1.28, -0.17],
-          [1.27, 1.39, -0.02],
-        ],
-      },
-      {
-        color: "#dd4245",
-        emissive: "#4a0b10",
-        radius: 0.11,
-        points: [
-          [0.6, 1.01, -0.2],
-          [0.96, 1.0, -0.11],
-          [1.29, 0.93, 0.04],
-        ],
-      },
-    ],
-    [],
-  );
-
   const aortaCurve = useMemo(() => toCurve(aortaDefinition.points), [aortaDefinition]);
   const conductionCurve = useMemo(
     () => toCurve(CONDUCTION_VESSELS[0].points),
@@ -580,32 +645,18 @@ function HeartModel({
         : 0;
 
     if (ventricularAssembly.current) {
+      const dilatedX = 1 + dilation * 0.34;
+      const dilatedY = 1 + dilation * 0.18;
+      const dilatedZ = 1 + dilation * 0.25;
       ventricularAssembly.current.scale.set(
-        1 - ventricularSystole * amplitude + vtShake,
-        1 - ventricularSystole * amplitude * 0.52,
-        1 - ventricularSystole * amplitude * 0.82,
+        dilatedX * (1 - ventricularSystole * amplitude + vtShake),
+        dilatedY * (1 - ventricularSystole * amplitude * 0.52),
+        dilatedZ * (1 - ventricularSystole * amplitude * 0.82),
       );
       ventricularAssembly.current.position.y = ventricularSystole * 0.035;
       ventricularAssembly.current.rotation.y =
         -ventricularSystole * 0.018 * simulation.contractility;
       ventricularAssembly.current.rotation.z = vtShake * 0.35;
-    }
-
-    if (leftVentricle.current) {
-      leftVentricle.current.rotation.z =
-        -0.04 - ventricularSystole * 0.008;
-    }
-
-    if (rightVentricle.current) {
-      const rightLag =
-        disease.id === "vt"
-          ? Math.sin(phase.current - 0.3) * 0.012 * severity
-          : 0;
-      rightVentricle.current.scale.set(
-        1 + rightLag,
-        1 - rightLag * 0.5,
-        1 + rightLag,
-      );
     }
 
     if (atrialAssembly.current) {
@@ -678,95 +729,56 @@ function HeartModel({
     }
   });
 
-  const ventActive = [
-    "ventricles",
-    "left-ventricle",
-    "anterior-lv",
-    "septum",
-  ].includes(region);
-  const atriaActive = region === "atria" || region === "mitral-valve";
-  const valveAorticActive = region === "aortic-valve";
-  const valveMitralActive = region === "mitral-valve";
-  const nodeActive = region === "av-node";
-  const coronaryActive = region === "anterior-lv";
-
   return (
     <group
       ref={root}
       rotation={[0.02, -0.04, -0.035]}
-      position={[0, -0.36, 0]}
-      scale={0.94}
+      position={[0, -0.08, 0]}
+      scale={0.86}
     >
       <group ref={ventricularAssembly}>
-        <mesh
-          ref={leftVentricle}
-          geometry={leftGeometry}
-          position={[0.25, -0.27, -0.02]}
-          rotation={[0.015, -0.015, -0.04]}
-          scale={[
-            1.02 + dilation,
-            1 + dilation * 0.82,
-            0.98 + dilation * 0.65,
-          ]}
-          castShadow
-        >
-          <meshPhysicalMaterial
-            color="#c83d3f"
-            roughness={0.56}
-            clearcoat={0.28}
-            clearcoatRoughness={0.46}
-            sheen={0.42}
-            sheenColor={new THREE.Color("#ffb0a3")}
-            sheenRoughness={0.72}
-            bumpMap={tissueTexture}
-            bumpScale={0.052}
-            emissive={ventActive ? activeColor : "#2d0508"}
-            emissiveIntensity={ventActive ? 0.07 + severity * 0.2 : 0.025}
-          />
-        </mesh>
+        <primitive
+          object={anatomicalAsset.model}
+          scale={[4.5, 4.5, 4.5]}
+          rotation={[0, Math.PI, 0]}
+        />
 
-        <mesh
-          ref={rightVentricle}
-          geometry={rightGeometry}
-          position={[-0.55, -0.08, 0.3]}
-          rotation={[0.03, 0.13, 0.12]}
-          scale={[1, 1, 1]}
-          castShadow
-        >
-          <meshPhysicalMaterial
-            color="#d84a49"
-            roughness={0.58}
-            clearcoat={0.25}
-            sheen={0.34}
-            sheenColor={new THREE.Color("#ffb5a8")}
-            sheenRoughness={0.78}
-            bumpMap={tissueTexture}
-            bumpScale={0.048}
-            emissive={region === "ventricles" ? activeColor : "#310609"}
-            emissiveIntensity={region === "ventricles" ? 0.08 + severity * 0.22 : 0.025}
-          />
-        </mesh>
+        {region === "septum" && (
+          <mesh
+            position={[0.03, -0.02, 1.16]}
+            rotation={[0, 0.04, -0.02]}
+            scale={[0.11 + septalGrowth, 0.82, 0.075]}
+          >
+            <sphereGeometry args={[1, 80, 56]} />
+            <meshPhysicalMaterial
+              color={activeColor}
+              roughness={0.5}
+              clearcoat={0.32}
+              emissive={activeColor}
+              emissiveIntensity={0.32 + severity * 0.45}
+              transparent
+              opacity={0.28 + severity * 0.25}
+              depthWrite={false}
+            />
+          </mesh>
+        )}
 
-        <mesh
-          position={[0.02, -0.11, 0.73]}
-          rotation={[0, 0.04, -0.02]}
-          scale={[0.13 + septalGrowth, 0.93, 0.11]}
-        >
-          <sphereGeometry args={[1, 40, 30]} />
-          <meshStandardMaterial
-            color={region === "septum" ? activeColor : "#ac2932"}
-            roughness={0.64}
-            emissive={region === "septum" ? activeColor : "#260308"}
-            emissiveIntensity={region === "septum" ? 0.35 + severity * 0.5 : 0.04}
-          />
-        </mesh>
-
-        <group position={[0, 0, 0.045]}>
+        <group position={[0, 0, 0.24]}>
           {CORONARY_VESSELS.map((definition, index) => (
             <AnatomicalTube
               key={`coronary-${index}`}
               definition={definition}
               highlight={coronaryActive && index < 7}
+            />
+          ))}
+        </group>
+
+        <group position={[0, 0, -0.16]}>
+          {POSTERIOR_CORONARY_VESSELS.map((definition, index) => (
+            <AnatomicalTube
+              key={`posterior-coronary-${index}`}
+              definition={definition}
+              highlight={coronaryActive && index < 5}
             />
           ))}
         </group>
@@ -828,146 +840,53 @@ function HeartModel({
       </group>
 
       <group ref={atrialAssembly}>
-        <mesh
-          position={[-0.55, 1.05, 0.03]}
-          rotation={[0, 0, 0.15]}
-          scale={[0.58, 0.68, 0.52]}
-          castShadow
-        >
-          <sphereGeometry args={[1, 52, 38]} />
-          <meshPhysicalMaterial
-            color="#d44845"
-            roughness={0.55}
-            clearcoat={0.24}
-            bumpMap={tissueTexture}
-            bumpScale={0.025}
-            emissive={region === "atria" ? activeColor : "#2b0507"}
-            emissiveIntensity={region === "atria" ? 0.06 + severity * 0.16 : 0.025}
-          />
-        </mesh>
-        <mesh
-          position={[0.47, 1.12, -0.07]}
-          scale={[0.6 + atrialGrowth, 0.6 + atrialGrowth, 0.5]}
-          castShadow
-        >
-          <sphereGeometry args={[1, 52, 38]} />
-          <meshPhysicalMaterial
-            color="#cb3f40"
-            roughness={0.54}
-            clearcoat={0.25}
-            bumpMap={tissueTexture}
-            bumpScale={0.025}
-            emissive={atriaActive ? activeColor : "#2a0508"}
-            emissiveIntensity={atriaActive ? 0.055 + severity * 0.15 : 0.025}
-          />
-        </mesh>
-        <mesh
-          position={[-0.91, 0.92, 0.29]}
-          rotation={[0.1, -0.1, -0.45]}
-          scale={[0.3, 0.52, 0.22]}
-          castShadow
-        >
-          <sphereGeometry args={[1, 40, 28]} />
-          <meshPhysicalMaterial
-            color="#d74a47"
-            roughness={0.58}
-            clearcoat={0.22}
-            bumpMap={tissueTexture}
-            bumpScale={0.028}
-            emissive={region === "atria" ? activeColor : "#2b0507"}
-            emissiveIntensity={region === "atria" ? 0.065 + severity * 0.16 : 0.025}
-          />
-        </mesh>
-        <mesh
-          position={[0.82, 1.03, 0.24]}
-          rotation={[0, 0.1, 0.38]}
-          scale={[0.3 + atrialGrowth * 0.4, 0.48, 0.22]}
-          castShadow
-        >
-          <sphereGeometry args={[1, 40, 28]} />
-          <meshPhysicalMaterial
-            color="#d94b48"
-            roughness={0.56}
-            clearcoat={0.22}
-            bumpMap={tissueTexture}
-            bumpScale={0.028}
-            emissive={atriaActive ? activeColor : "#2b0507"}
-            emissiveIntensity={atriaActive ? 0.06 + severity * 0.16 : 0.025}
-          />
-        </mesh>
+        {(region === "atria" || disease.id === "afib") && (
+          <>
+            <mesh
+              position={[-0.38, 1.03, 1.11]}
+              rotation={[0, 0, 0.13]}
+              scale={[1.08, 1.28, 1]}
+            >
+              <torusGeometry args={[0.2, 0.022, 18, 72]} />
+              <meshBasicMaterial
+                color={activeColor}
+                transparent
+                opacity={0.5 + severity * 0.25}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+              />
+            </mesh>
+            <mesh
+              position={[0.4, 1.08, 1.1]}
+              rotation={[0, 0, -0.12]}
+              scale={[1.08 + atrialGrowth, 1.24 + atrialGrowth, 1]}
+            >
+              <torusGeometry args={[0.2, 0.022, 18, 72]} />
+              <meshBasicMaterial
+                color={activeColor}
+                transparent
+                opacity={0.5 + severity * 0.25}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+              />
+            </mesh>
+            <pointLight
+              color={activeColor}
+              intensity={0.25 + severity * 0.45}
+              distance={0.85}
+              position={[-0.38, 1.03, 1.32]}
+            />
+            <pointLight
+              color={activeColor}
+              intensity={0.25 + severity * 0.45}
+              distance={0.85}
+              position={[0.4, 1.08, 1.31]}
+            />
+          </>
+        )}
       </group>
 
       <group ref={greatVessels}>
-        <AnatomicalTube
-          definition={aortaDefinition}
-          highlight={valveAorticActive}
-        />
-        {aorticBranches.map((definition, index) => (
-          <AnatomicalTube
-            key={`aortic-branch-${index}`}
-            definition={definition}
-            highlight={false}
-          />
-        ))}
-        <AnatomicalTube definition={pulmonaryTrunk} />
-        <AnatomicalTube definition={superiorVenaCava} />
-        {pulmonaryVeins.map((definition, index) => (
-          <AnatomicalTube
-            key={`pulmonary-vein-${index}`}
-            definition={definition}
-          />
-        ))}
-
-        <VesselMouth
-          position={[-0.54, 2.72, -0.32]}
-          direction={[0, 1, 0.08]}
-          radius={0.14}
-          color="#df4142"
-        />
-        <VesselMouth
-          position={[0.09, 2.78, -0.27]}
-          direction={[0.2, 1, 0.14]}
-          radius={0.145}
-          color="#df4142"
-        />
-        <VesselMouth
-          position={[0.68, 2.61, -0.18]}
-          direction={[0.54, 0.82, 0.2]}
-          radius={0.13}
-          color="#df4142"
-        />
-        <VesselMouth
-          position={[-0.86, 2.62, -0.12]}
-          direction={[0, 1, 0.06]}
-          radius={0.205}
-          color={VEIN_LIGHT}
-        />
-        <VesselMouth
-          position={[0.85, 1.53, 0.27]}
-          direction={[0.9, -0.1, -0.2]}
-          radius={0.225}
-          color={VEIN_LIGHT}
-        />
-
-        {pulmonaryVeins.map((definition, index) => {
-          const end = definition.points[definition.points.length - 1];
-          const previous = definition.points[definition.points.length - 2];
-          const direction: Point3 = [
-            end[0] - previous[0],
-            end[1] - previous[1],
-            end[2] - previous[2],
-          ];
-          return (
-            <VesselMouth
-              key={`pulmonary-mouth-${index}`}
-              position={end}
-              direction={direction}
-              radius={definition.radius}
-              color="#e44a4c"
-            />
-          );
-        })}
-
         {valveAorticActive && (
           <mesh
             position={[0.24, 0.93, 0.2]}
@@ -1010,18 +929,20 @@ function HeartModel({
         />
       </mesh>
 
-      <group ref={aorticFlow}>
-        {Array.from({ length: 12 }).map((_, index) => (
-          <mesh key={index}>
-            <sphereGeometry args={[0.042, 12, 10]} />
-            <meshBasicMaterial
-              color="#ffd8cf"
-              transparent
-              opacity={0.82}
-            />
-          </mesh>
-        ))}
-      </group>
+      {disease.id === "aortic-stenosis" && (
+        <group ref={aorticFlow}>
+          {Array.from({ length: 12 }).map((_, index) => (
+            <mesh key={index}>
+              <sphereGeometry args={[0.033, 16, 12]} />
+              <meshBasicMaterial
+                color={activeColor}
+                transparent
+                opacity={0.68}
+              />
+            </mesh>
+          ))}
+        </group>
+      )}
 
       {disease.id === "mitral-regurgitation" && (
         <group ref={backFlow}>
@@ -1039,32 +960,36 @@ function HeartModel({
       )}
 
       {disease.id === "pericarditis" && (
-        <group position={[0.08, -0.15, 0]} scale={[1.22, 1.18, 1.22]}>
-          <mesh geometry={leftGeometry} position={[0.18, -0.12, -0.02]}>
-            <meshPhysicalMaterial
-              color={activeColor}
-              emissive={activeColor}
-              emissiveIntensity={0.25 + severity * 0.45}
-              transparent
-              opacity={0.07 + severity * 0.12}
-              roughness={0.28}
-              transmission={0.12}
-              depthWrite={false}
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-        </group>
+        <primitive
+          object={pericardialAsset.model}
+          scale={[4.61, 4.61, 4.61]}
+        />
       )}
     </group>
   );
 }
 
-export function HeartScene(props: HeartSceneProps) {
-  const [mounted, setMounted] = useState(false);
+function CanvasLoadingHeart() {
+  return (
+    <mesh scale={[0.95, 1.35, 0.8]} rotation={[0, 0, -0.08]}>
+      <icosahedronGeometry args={[1, 5]} />
+      <meshPhysicalMaterial
+        color="#8f202d"
+        roughness={0.52}
+        clearcoat={0.25}
+        transparent
+        opacity={0.32}
+      />
+    </mesh>
+  );
+}
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+export function HeartScene(props: HeartSceneProps) {
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    clientMountedSnapshot,
+    serverMountedSnapshot,
+  );
 
   if (!mounted) {
     return (
@@ -1085,29 +1010,33 @@ export function HeartScene(props: HeartSceneProps) {
         alpha: true,
         powerPreference: "high-performance",
         toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.12,
+        toneMappingExposure: 0.96,
       }}
-      aria-label={`Modelo tridimensional educativo del corazón inspirado en la referencia anatómica aportada. Zona resaltada: ${props.disease.regionLabel}.`}
+      data-heart-quality="anatomical-high-detail"
+      data-heart-triangles="149992"
+      aria-label={`Modelo tridimensional educativo de alta definición con malla anatómica, texturas de tejido y red vascular anterior y posterior. Zona resaltada: ${props.disease.regionLabel}.`}
     >
-      <ambientLight intensity={1.05} />
+      <ambientLight intensity={0.72} />
       <hemisphereLight
         color="#fff6f0"
         groundColor="#102036"
-        intensity={1.45}
+        intensity={1.08}
       />
       <directionalLight
         position={[4, 5, 5]}
-        intensity={3.1}
+        intensity={2.25}
         color="#fff8f1"
         castShadow
       />
       <directionalLight
         position={[-4, 2, 4]}
-        intensity={1.8}
+        intensity={1.28}
         color="#a9d7ff"
       />
-      <pointLight position={[1, -1, 4]} intensity={1.2} color="#ff8e86" />
-      <HeartModel {...props} />
+      <pointLight position={[1, -1, 4]} intensity={0.72} color="#ff8e86" />
+      <Suspense fallback={<CanvasLoadingHeart />}>
+        <HeartModel {...props} />
+      </Suspense>
       <ContactShadows
         position={[0, -2.42, 0]}
         opacity={0.38}
@@ -1131,6 +1060,8 @@ export function HeartScene(props: HeartSceneProps) {
     </Canvas>
   );
 }
+
+useGLTF.preload("/models/heart-anatomy-high-detail.glb");
 
 function HeartLoadingMark() {
   return (
