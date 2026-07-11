@@ -5,6 +5,7 @@ import { getAfibBeat } from "./afibModel";
 import { aorticStenosisEcgValue } from "./aorticStenosisModel";
 import { avBlockEcgValue } from "./avBlockModel";
 import { heartFailureEcgValue } from "./heartFailureModel";
+import { hcmEcgValue } from "./hcmModel";
 import type { HeartMotionTelemetry } from "./heartMotion";
 import { ischemiaEcgValue } from "./ischemiaModel";
 import { infarctionEcgValue } from "./infarctionModel";
@@ -173,13 +174,16 @@ function ecgValue(
     );
   }
 
-  let value = baseWave(phase, lead);
-
   if (pattern === "hcm") {
-    value += 0.82 * severity01 * gaussian(phase, 0.31, 0.01);
-    value -= 0.4 * severity01 * gaussian(phase, 0.275, 0.018);
-    value -= 0.5 * severity01 * gaussian(phase, 0.59, 0.068);
+    return hcmEcgValue(
+      time,
+      safeRate,
+      lead,
+      simulation.hcm.ecgRemodeling,
+    );
   }
+
+  const value = baseWave(phase, lead);
 
   return value * modifier;
 }

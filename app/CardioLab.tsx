@@ -178,6 +178,18 @@ const SOURCES = [
     href: "https://www.escardio.org/communities/councils/cardiology-practice/scientific-documents-and-publications/ejournal/volume-15/Diagnosis-of-acute-pericarditis/",
   },
   {
+    label: "AHA/ACC 2024 · Guía de miocardiopatía hipertrófica",
+    href: "https://www.acc.org/Guidelines/Guidelines/2024/05/08/11/09/2024-Hypertrophic-Cardiomyopathy",
+  },
+  {
+    label: "ESC 2023 · Guía de miocardiopatías",
+    href: "https://academic.oup.com/eurheartj/article/44/37/3503/7246608",
+  },
+  {
+    label: "EACVI 2025 · Imagen multimodal en MCH",
+    href: "https://academic.oup.com/ehjcimaging/article/27/3/369/8313597",
+  },
+  {
     label: "NCBI · Resistencia vascular y viscosidad",
     href: "https://www.ncbi.nlm.nih.gov/books/NBK538308/",
   },
@@ -267,7 +279,7 @@ const MOTION_FOCUS: Record<DiseaseId, string> = {
   "aortic-stenosis": "Eyección prolongada · VI con hipertrofia concéntrica",
   "mitral-regurgitation": "Sístole: flujo aórtico útil + chorro retrógrado hacia AI",
   pericarditis: "Miocardio conservado · pericardio inflamado, sin taponamiento",
-  hcm: "Septo: engrosamiento y cavidad reducida",
+  hcm: "Septo hipertrófico + SAM mitral · obstrucción sistólica tardía",
 };
 
 const STAGE_LABELS: Record<CardiacStage, string> = {
@@ -438,6 +450,19 @@ function CardiacMotionGuide({
           <span>
             Inflamación {Math.round(simulation.pericarditis.inflammationFraction * 100)}%
             {" · "}Contracción miocárdica conservada
+          </span>
+        </span>
+      )}
+      {disease.id === "hcm" && !movementPaused && (
+        <span className="rhythm-motion-readout">
+          <span>
+            Septo {simulation.hcm.septalThickness.toFixed(0)} mm · TSVI{" "}
+            {Math.round(simulation.hcm.lvotGradient)} mmHg
+          </span>
+          <span>
+            SAM {Math.round(simulation.hcm.systolicAnteriorMotion * 100)}%
+            {" · "}FE {Math.round(simulation.hcm.ejectionFraction)}%
+            {" · "}flujo útil {Math.round(simulation.hcm.forwardStrokeVolume)} mL
           </span>
         </span>
       )}
@@ -990,6 +1015,8 @@ export default function CardioLab() {
                           ? "Remodelado aurículo-ventricular acumulado"
                         : disease.id === "pericarditis"
                           ? "Inflamación pericárdica basal"
+                        : disease.id === "hcm"
+                          ? "Remodelado y rigidez diastólica basal"
                   : disease.id === "afib" ||
                       disease.id === "vt" ||
                       disease.id === "av-block"
@@ -1042,6 +1069,8 @@ export default function CardioLab() {
                         ? "Grado integrado de IM"
                       : disease.id === "pericarditis"
                         ? "Fase ECG y pericárdica"
+                      : disease.id === "hcm"
+                        ? "Fenotipo obstructivo integrado"
                 : disease.id === "afib" ||
                     disease.id === "vt" ||
                     disease.id === "av-block"
@@ -1054,7 +1083,8 @@ export default function CardioLab() {
                 disease.id === "heart-failure" ||
                 disease.id === "aortic-stenosis" ||
                 disease.id === "mitral-regurgitation" ||
-                disease.id === "pericarditis"
+                disease.id === "pericarditis" ||
+                disease.id === "hcm"
                   ? "stage-label"
                   : undefined
               }
@@ -1069,6 +1099,8 @@ export default function CardioLab() {
                       ? simulation.mitralRegurgitation.stageLabel
                     : disease.id === "pericarditis"
                       ? simulation.pericarditis.stageLabel
+                    : disease.id === "hcm"
+                      ? simulation.hcm.stageLabel
                 : `${Math.round(simulation.severity)}%`}
             </strong>
             <small>
@@ -1090,6 +1122,8 @@ export default function CardioLab() {
                         ? `FR ${Math.round(simulation.mitralRegurgitation.regurgitantFraction * 100)}% · VReg ${Math.round(simulation.mitralRegurgitation.regurgitantVolume)} mL · ORE ${simulation.mitralRegurgitation.effectiveRegurgitantOrificeArea.toFixed(2)} cm² · flujo útil ${Math.round(simulation.mitralRegurgitation.forwardStrokeVolume)} mL · FE total ${Math.round(simulation.mitralRegurgitation.ejectionFraction)}%`
                       : disease.id === "pericarditis"
                         ? `ST ${Math.round(simulation.pericarditis.stElevation * 100)}% · PR ${Math.round(simulation.pericarditis.prDepression * 100)}% · inversión T ${Math.round(simulation.pericarditis.tInversion * 100)}% · sin derrame ni taponamiento`
+                      : disease.id === "hcm"
+                        ? `septo ${simulation.hcm.septalThickness.toFixed(0)} mm · relación septo/pared ${simulation.hcm.asymmetryRatio.toFixed(1)} · Vmáx TSVI ${simulation.hcm.peakVelocity.toFixed(1)} m/s · gradiente ${Math.round(simulation.hcm.lvotGradient)} mmHg · VTD ${Math.round(simulation.hcm.endDiastolicVolume)} mL · FE ${Math.round(simulation.hcm.ejectionFraction)}%`
                     : "base + variable propia + tiempo + modificadores"}
             </small>
           </div>

@@ -9,6 +9,11 @@ import {
   type HeartFailureProgression,
 } from "./heartFailureModel.ts";
 import {
+  deriveHcmProgression,
+  EMPTY_HCM_PROGRESSION,
+  type HcmProgression,
+} from "./hcmModel.ts";
+import {
   deriveInfarctionProgression,
   EMPTY_INFARCTION_PROGRESSION,
   type InfarctionProgression,
@@ -121,6 +126,7 @@ export type DerivedSimulation = {
   aorticStenosis: AorticStenosisProgression;
   mitralRegurgitation: MitralRegurgitationProgression;
   pericarditis: PericarditisProgression;
+  hcm: HcmProgression;
   heartRate: number;
   atrialRate: number;
   avBlockStage: AvBlockStage;
@@ -461,31 +467,31 @@ export const DISEASES: Disease[] = [
   {
     id: "hcm",
     code: "MCH",
-    name: "Miocardiopatía hipertrófica",
+    name: "Miocardiopatía hipertrófica · basal-septal",
     family: "Músculo",
     color: "#d895ff",
     region: "septum",
     regionLabel: "septo y tracto de salida del VI",
     pattern: "hcm",
     summary:
-      "El músculo, sobre todo el septo, se engrosa y puede dificultar la salida de sangre.",
+      "Fenotipo basal-septal: el septo engrosado y la válvula mitral estrechan dinámicamente la salida del VI.",
     heartLesson:
-      "Observa el septo aumentado, la cavidad menor y el tracto de salida más estrecho.",
+      "Observa el septo asimétrico, la cavidad pequeña, el SAM mitral y el chorro tardío y turbulento del TSVI.",
     ecgLesson:
-      "Puede haber voltajes altos, ondas Q estrechas y cambios de repolarización.",
+      "El patrón representativo combina voltaje alto, Q estrechas seudoinfarto y alteración lateral ST–T, sin imitar la variante apical.",
     causalLesson:
-      "La obstrucción dinámica y el llenado diastólico importan tanto como la fuerza de contracción.",
+      "La obstrucción aumenta con taquicardia y menor poscarga; la rigidez reduce el llenado aunque la FE sea alta.",
     caveat:
-      "El ECG aporta pistas, pero no define por sí solo el grosor ni la obstrucción anatómica.",
+      "Este caso excluye MCH apical y fase terminal. Un grosor de 13–14 mm es limítrofe y requiere contexto familiar, genético o multimodal.",
     rhythmLabel: "Sinusal",
     qrsLabel: "Alto voltaje / Q estrecha",
-    stLabel: "T invertida posible",
-    mechanicalLoss: 0.32,
-    progressionRate: 0.12,
+    stLabel: "ST–T lateral variable",
+    mechanicalLoss: 0,
+    progressionRate: 0,
     timeUnit: "años",
     specific: {
       label: "Grosor septal conceptual",
-      min: 12,
+      min: 13,
       max: 35,
       step: 1,
       defaultValue: 21,
@@ -578,6 +584,16 @@ export function deriveSimulation(
           clinicalTime,
         )
       : EMPTY_PERICARDITIS_PROGRESSION;
+  const hcm =
+    disease.id === "hcm"
+      ? deriveHcmProgression(
+          specificValue,
+          baseSeverity,
+          clinicalTime,
+          vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7,
+          vitals.systolic,
+        )
+      : EMPTY_HCM_PROGRESSION;
   const demandHeartRate =
     vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7;
   const ratePressureProduct = demandHeartRate * vitals.systolic;
@@ -643,6 +659,14 @@ export function deriveSimulation(
                 )
               : disease.id === "pericarditis"
                 ? pericarditis.inflammationFraction
+              : disease.id === "hcm"
+                ? clamp(
+                    hcm.hypertrophyFraction * 0.42 +
+                      hcm.lvotObstructionFraction * 0.38 +
+                      hcm.diastolicStiffness * 0.2,
+                    0,
+                    1,
+                  )
         : genericRiskIndex;
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
@@ -688,13 +712,22 @@ export function deriveSimulation(
                     )
                   : disease.id === "pericarditis"
                     ? pericarditis.inflammationFraction * 100
+                  : disease.id === "hcm"
+                    ? clamp(
+                        hcm.hypertrophyFraction * 50 +
+                          hcm.lvotObstructionFraction * 35 +
+                          hcm.diastolicStiffness * 15,
+                        0,
+                        100,
+                      )
           : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression =
     disease.id === "infarction" ||
     disease.id === "heart-failure" ||
     disease.id === "aortic-stenosis" ||
     disease.id === "mitral-regurgitation" ||
-    disease.id === "pericarditis"
+    disease.id === "pericarditis" ||
+    disease.id === "hcm"
       ? 0
       : clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
@@ -772,7 +805,7 @@ export function deriveSimulation(
     contractility = mitralRegurgitation.contractility;
   }
   if (disease.id === "hcm") {
-    contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
+    contractility = hcm.contractility;
   }
   if (disease.id === "pericarditis") {
     contractility = pericarditis.contractility;
@@ -799,8 +832,7 @@ export function deriveSimulation(
             ? 0.92
             : 0.98
           : 1;
-  const valvePenalty =
-    disease.id === "hcm" ? 1 - severity01 * 0.2 : 1;
+  const valvePenalty = 1;
   const regionalPumpPenalty =
     disease.id === "infarction"
       ? clamp(
@@ -819,6 +851,8 @@ export function deriveSimulation(
         ? clamp(aorticStenosis.strokeVolume, 18, 105)
         : disease.id === "mitral-regurgitation"
           ? clamp(mitralRegurgitation.forwardStrokeVolume, 18, 105)
+        : disease.id === "hcm"
+          ? clamp(hcm.forwardStrokeVolume, 18, 105)
       : clamp(
           74 *
             contractility *
@@ -876,7 +910,7 @@ export function deriveSimulation(
   } else if (disease.id === "pericarditis") {
     ejectionFraction = pericarditis.ejectionFraction;
   } else if (disease.id === "hcm") {
-    ejectionFraction = clamp(67 + severity01 * 6, 62, 78);
+    ejectionFraction = hcm.ejectionFraction;
   }
 
   const outputLoss =
@@ -908,10 +942,12 @@ export function deriveSimulation(
   const activeRisks: string[] = [];
   if (pressureLoad > 0.22) activeRisks.push("poscarga alta");
   if (pressureLow > 0.25) activeRisks.push("presión de perfusión baja");
-  if (ldlLoad > 0.3) activeRisks.push("LDL crónico");
+  if (ldlLoad > 0.3 && disease.id !== "hcm") activeRisks.push("LDL crónico");
   if (feverLoad > 0.18) activeRisks.push("fiebre / demanda");
   if (hypoxiaLoad > 0.16) activeRisks.push("aporte de O₂ bajo");
-  if (viscosityLoad > 0.28) activeRisks.push("resistencia conceptual");
+  if (viscosityLoad > 0.28 && disease.id !== "hcm") {
+    activeRisks.push("resistencia conceptual");
+  }
   if (disease.id === "heart-failure") {
     activeRisks.push("FE reducida");
     if (heartFailure.dilationFraction > 0.58) activeRisks.push("VI dilatado");
@@ -947,6 +983,18 @@ export function deriveSimulation(
       activeRisks.push("patrón ST–PR difuso");
     }
   }
+  if (disease.id === "hcm") {
+    activeRisks.push(`septo ${hcm.septalThickness.toFixed(0)} mm`);
+    if (hcm.lvotGradient >= 30) {
+      activeRisks.push(`LVOTO ${Math.round(hcm.lvotGradient)} mmHg`);
+    }
+    if (hcm.diastolicStiffness > 0.48) {
+      activeRisks.push("rigidez diastólica");
+    }
+    if (hcm.septalThickness >= 30) {
+      activeRisks.push("hipertrofia masiva");
+    }
+  }
   if (disease.id === "infarction" && infarction.occlusiveLoad > 0.55) {
     activeRisks.push("oclusión aguda de la DA");
   }
@@ -969,9 +1017,10 @@ export function deriveSimulation(
     (disease.id === "infarction" && infarction.wallMotionLoss > 0.72) ||
     (disease.id === "heart-failure" && heartFailure.ejectionFraction <= 30) ||
     (disease.id === "av-block" && avBlockStage >= 3) ||
+    (disease.id === "hcm" && hcm.lvotGradient >= 50) ||
     currentSystolic < 102 ||
     cardiacOutput < 3.8 ||
-    (severity > 72 && disease.id !== "pericarditis")
+    (severity > 72 && disease.id !== "pericarditis" && disease.id !== "hcm")
   ) {
     stability = "Vigilancia";
     stabilityTone = "watch";
@@ -986,6 +1035,7 @@ export function deriveSimulation(
     aorticStenosis,
     mitralRegurgitation,
     pericarditis,
+    hcm,
     heartRate,
     atrialRate,
     avBlockStage,

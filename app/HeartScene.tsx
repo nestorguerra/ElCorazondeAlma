@@ -686,6 +686,10 @@ function HeartModel({
   const backFlow = useRef<THREE.Group>(null);
   const mitralForwardFlow = useRef<THREE.Group>(null);
   const mitralValveLeaflets = useRef<THREE.Group>(null);
+  const hcmSeptum = useRef<THREE.Mesh>(null);
+  const hcmSamLeaflet = useRef<THREE.Group>(null);
+  const hcmLvotFlow = useRef<THREE.Group>(null);
+  const hcmMitralFlow = useRef<THREE.Group>(null);
   const electricPulse = useRef<THREE.Mesh>(null);
   const lesionPatch = useRef<THREE.Mesh>(null);
   const phase = useRef(0);
@@ -714,7 +718,10 @@ function HeartModel({
     disease.id === "mitral-regurgitation"
       ? simulation.mitralRegurgitation.leftAtrialDilation
       : 0;
-  const septalGrowth = disease.id === "hcm" ? severity * 0.35 : 0;
+  const hcmLaDilation =
+    disease.id === "hcm" ? simulation.hcm.leftAtrialDilation : 0;
+  const septalGrowth =
+    disease.id === "hcm" ? simulation.hcm.hypertrophyFraction * 0.38 : 0;
   const ischemiaVisibility =
     disease.id === "ischemia"
       ? smoothStep01((severity - 0.18) / 0.64)
@@ -887,6 +894,17 @@ function HeartModel({
       ]),
     [],
   );
+  const hcmLvotCurve = useMemo(
+    () =>
+      toCurve([
+        [0.08, 0.22, 0.78],
+        [0.13, 0.52, 0.6],
+        [0.2, 0.8, 0.38],
+        [0.25, 1.04, 0.14],
+        [0.31, 1.35, -0.08],
+      ]),
+    [],
+  );
 
   useFrame((state, delta) => {
     if (reducedMotion) {
@@ -933,9 +951,9 @@ function HeartModel({
         },
       );
       atrialAssembly.current?.scale.set(
-        1 + mitralLaDilation * 0.16,
-        1 + mitralLaDilation * 0.13,
-        1 + mitralLaDilation * 0.15,
+        1 + mitralLaDilation * 0.16 + hcmLaDilation * 0.08,
+        1 + mitralLaDilation * 0.13 + hcmLaDilation * 0.06,
+        1 + mitralLaDilation * 0.15 + hcmLaDilation * 0.07,
       );
       [coronaryLayer.current, posteriorCoronaryLayer.current].forEach(
         (layer, index) => {
@@ -971,6 +989,19 @@ function HeartModel({
       mitralForwardFlow.current?.children.forEach((particle) => {
         particle.visible = false;
       });
+      hcmLvotFlow.current?.children.forEach((particle) => {
+        particle.visible = false;
+      });
+      hcmMitralFlow.current?.children.forEach((particle) => {
+        particle.visible = false;
+      });
+      if (hcmSeptum.current) {
+        hcmSeptum.current.scale.set(0.13 + septalGrowth, 0.84, 0.08);
+      }
+      if (hcmSamLeaflet.current) {
+        hcmSamLeaflet.current.position.set(0.2, 0.56, 0.58);
+        hcmSamLeaflet.current.rotation.set(0.18, -0.08, -0.18);
+      }
       if (mitralValveLeaflets.current) {
         const residualGap =
           0.026 +
@@ -1144,11 +1175,11 @@ function HeartModel({
           : 0;
       const atrialContraction = atrialSystole * 0.065;
       atrialAssembly.current.scale.set(
-        (1 + mitralLaDilation * 0.16) *
+        (1 + mitralLaDilation * 0.16 + hcmLaDilation * 0.08) *
           (1 - atrialContraction + fibrillationX),
-        (1 + mitralLaDilation * 0.13) *
+        (1 + mitralLaDilation * 0.13 + hcmLaDilation * 0.06) *
           (1 - atrialContraction * 0.72 - fibrillationZ * 0.28),
-        (1 + mitralLaDilation * 0.15) *
+        (1 + mitralLaDilation * 0.15 + hcmLaDilation * 0.07) *
           (1 - atrialContraction + fibrillationZ),
       );
       atrialAssembly.current.rotation.y = fibrillationX * 0.65;
@@ -1375,6 +1406,82 @@ function HeartModel({
       if (posteriorLeaflet) posteriorLeaflet.position.x = leafletDistance;
     }
 
+    if (hcmSeptum.current) {
+      const systolicThickening = ventricularSystole * 0.035;
+      hcmSeptum.current.scale.set(
+        0.13 + septalGrowth + systolicThickening,
+        0.84 * (1 - ventricularSystole * 0.035),
+        0.08 + simulation.hcm.hypertrophyFraction * 0.028,
+      );
+      hcmSeptum.current.position.x =
+        0.03 + ventricularSystole * 0.025;
+    }
+
+    if (hcmSamLeaflet.current) {
+      const samExcursion =
+        ventricularSystole * simulation.hcm.systolicAnteriorMotion;
+      hcmSamLeaflet.current.position.set(
+        0.2 - samExcursion * 0.12,
+        0.56 + samExcursion * 0.2,
+        0.58 + samExcursion * 0.22,
+      );
+      hcmSamLeaflet.current.rotation.set(
+        0.18 + samExcursion * 0.3,
+        -0.08,
+        -0.18 - samExcursion * 0.58,
+      );
+    }
+
+    if (hcmLvotFlow.current) {
+      hcmLvotFlow.current.children.forEach((particle, index) => {
+        const obstruction = simulation.hcm.lvotObstructionFraction;
+        const visibleParticles = 7 + Math.round(obstruction * 11);
+        particle.visible =
+          ventricularSystole > 0.08 && index < visibleParticles;
+        const progress =
+          (state.clock.elapsedTime *
+            (0.15 + simulation.hcm.peakVelocity * 0.08) +
+            index / 18) %
+          1;
+        particle.position.copy(hcmLvotCurve.getPointAt(progress));
+        if (progress < 0.7) {
+          const lateJet = Math.sin(Math.PI * progress / 0.7);
+          particle.position.x +=
+            Math.sin(state.clock.elapsedTime * 18 + index * 2.13) *
+            simulation.hcm.jetTurbulence *
+            0.07 *
+            lateJet;
+          particle.position.z +=
+            Math.cos(state.clock.elapsedTime * 16 + index * 1.67) *
+            simulation.hcm.jetTurbulence *
+            0.05 *
+            lateJet;
+        }
+        particle.scale.setScalar(0.46 + ventricularSystole * 0.38);
+        const material = (particle as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        material.opacity = 0.4 + ventricularSystole * 0.48;
+      });
+    }
+
+    if (hcmMitralFlow.current) {
+      hcmMitralFlow.current.children.forEach((particle, index) => {
+        const regurgitation = simulation.hcm.mitralRegurgitantFraction;
+        const visibleParticles = Math.round(regurgitation * 58);
+        particle.visible =
+          ventricularSystole > 0.08 && index < visibleParticles;
+        const progress =
+          (state.clock.elapsedTime * 0.47 + index / 14) % 1;
+        particle.position.copy(mitralBackflowCurve.getPointAt(progress));
+        particle.position.x -= progress * 0.08;
+        particle.position.z += progress * 0.04;
+        particle.scale.setScalar(0.38 + ventricularSystole * 0.38);
+        const material = (particle as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        material.opacity = 0.36 + ventricularSystole * 0.46;
+      });
+    }
+
     if (pericardialLayer.current) {
       // Acute uncomplicated pericarditis inflames the surrounding sac but
       // does not mechanically squeeze otherwise normal myocardium.
@@ -1482,9 +1589,10 @@ function HeartModel({
 
         {region === "septum" && (
           <mesh
+            ref={hcmSeptum}
             position={[0.03, -0.02, 1.16]}
             rotation={[0, 0.04, -0.02]}
-            scale={[0.11 + septalGrowth, 0.82, 0.075]}
+            scale={[0.13 + septalGrowth, 0.84, 0.08]}
           >
             <sphereGeometry args={[1, 80, 56]} />
             <meshPhysicalMaterial
@@ -1492,9 +1600,13 @@ function HeartModel({
               roughness={0.5}
               clearcoat={0.32}
               emissive={activeColor}
-              emissiveIntensity={0.32 + severity * 0.45}
+              emissiveIntensity={
+                0.28 + simulation.hcm.hypertrophyFraction * 0.42
+              }
               transparent
-              opacity={0.28 + severity * 0.25}
+              opacity={
+                0.28 + simulation.hcm.hypertrophyFraction * 0.28
+              }
               depthWrite={false}
             />
           </mesh>
@@ -1835,6 +1947,63 @@ function HeartModel({
                   color="#72efc5"
                   transparent
                   opacity={0.72}
+                />
+              </mesh>
+            ))}
+          </group>
+        </>
+      )}
+
+      {disease.id === "hcm" && (
+        <>
+          <group
+            ref={hcmSamLeaflet}
+            position={[0.2, 0.56, 0.58]}
+            rotation={[0.18, -0.08, -0.18]}
+          >
+            <mesh scale={[0.08, 0.24, 0.035]}>
+              <sphereGeometry args={[1, 30, 20]} />
+              <meshPhysicalMaterial
+                color="#f4c2b4"
+                emissive={activeColor}
+                emissiveIntensity={0.24}
+                roughness={0.45}
+                clearcoat={0.26}
+              />
+            </mesh>
+            <mesh position={[0.03, -0.02, 0]} scale={[0.13, 0.31, 0.012]}>
+              <ringGeometry args={[0.72, 1, 42]} />
+              <meshBasicMaterial
+                color={activeColor}
+                transparent
+                opacity={0.42}
+                side={THREE.DoubleSide}
+                depthWrite={false}
+              />
+            </mesh>
+          </group>
+          <group ref={hcmLvotFlow}>
+            {Array.from({ length: 18 }).map((_, index) => (
+              <mesh key={index}>
+                <sphereGeometry args={[0.029, 14, 10]} />
+                <meshBasicMaterial
+                  color={index % 3 === 0 ? "#ffe599" : "#8ce8ff"}
+                  transparent
+                  opacity={0.7}
+                  depthWrite={false}
+                />
+              </mesh>
+            ))}
+          </group>
+          <group ref={hcmMitralFlow}>
+            {Array.from({ length: 14 }).map((_, index) => (
+              <mesh key={index}>
+                <sphereGeometry args={[0.034, 14, 10]} />
+                <meshBasicMaterial
+                  color="#5fdaff"
+                  transparent
+                  opacity={0.68}
+                  depthWrite={false}
                 />
               </mesh>
             ))}
