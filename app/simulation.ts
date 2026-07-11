@@ -13,6 +13,11 @@ import {
   EMPTY_INFARCTION_PROGRESSION,
   type InfarctionProgression,
 } from "./infarctionModel.ts";
+import {
+  deriveMitralRegurgitationProgression,
+  EMPTY_MITRAL_REGURGITATION_PROGRESSION,
+  type MitralRegurgitationProgression,
+} from "./mitralRegurgitationModel.ts";
 
 type AvBlockStage = 1 | 2 | 3 | 4;
 
@@ -109,6 +114,7 @@ export type DerivedSimulation = {
   infarction: InfarctionProgression;
   heartFailure: HeartFailureProgression;
   aorticStenosis: AorticStenosisProgression;
+  mitralRegurgitation: MitralRegurgitationProgression;
   heartRate: number;
   atrialRate: number;
   avBlockStage: AvBlockStage;
@@ -388,25 +394,25 @@ export const DISEASES: Disease[] = [
     regionLabel: "válvula mitral y aurícula izquierda",
     pattern: "mitral-regurgitation",
     summary:
-      "La válvula no cierra bien y parte de la sangre vuelve a la aurícula izquierda.",
+      "Una lesión degenerativa impide la coaptación mitral y desvía parte del volumen sistólico hacia la aurícula izquierda.",
     heartLesson:
-      "Durante la sístole aparece un chorro retrógrado y disminuye el flujo útil hacia la aorta.",
+      "Durante la sístole compara el volumen total del VI, el chorro retrógrado hacia la AI y el volumen útil que cruza la aorta.",
     ecgLesson:
-      "No hay un patrón único; este ejemplo muestra una P ensanchada como pista de remodelado auricular crónico.",
+      "El ECG puede seguir siendo normal. Con remodelado crónico pueden aparecer P ancha y mellada en DII, componente terminal negativo en V2 o voltaje de VI.",
     causalLesson:
-      "Una poscarga elevada puede aumentar el flujo regurgitante en este modelo simplificado.",
+      "La sobrecarga de volumen dilata progresivamente AI y VI; la FE total puede parecer normal o alta aunque el gasto anterógrado disminuya.",
     caveat:
-      "La gravedad real se cuantifica principalmente con ecocardiografía, no con ECG.",
+      "Fenotipo primario degenerativo crónico, compensado y en ritmo sinusal. No representa IM secundaria, rotura papilar aguda ni fibrilación auricular.",
     rhythmLabel: "Sinusal",
-    qrsLabel: "Estrecho",
-    stLabel: "Sin patrón específico",
-    mechanicalLoss: 0.46,
-    progressionRate: 0.2,
-    timeUnit: "meses",
+    qrsLabel: "Estrecho · voltaje variable",
+    stLabel: "Sin patrón ST–T específico",
+    mechanicalLoss: 0.04,
+    progressionRate: 0,
+    timeUnit: "años",
     specific: {
-      label: "Fracción regurgitante",
+      label: "Fracción regurgitante actual",
       min: 10,
-      max: 70,
+      max: 60,
       step: 1,
       defaultValue: 38,
       unit: "%",
@@ -548,6 +554,16 @@ export function deriveSimulation(
           vitals.systolic,
         )
       : EMPTY_AORTIC_STENOSIS_PROGRESSION;
+  const mitralRegurgitation =
+    disease.id === "mitral-regurgitation"
+      ? deriveMitralRegurgitationProgression(
+          specificValue,
+          baseSeverity,
+          clinicalTime,
+          vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7,
+          vitals.systolic,
+        )
+      : EMPTY_MITRAL_REGURGITATION_PROGRESSION;
   const demandHeartRate =
     vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7;
   const ratePressureProduct = demandHeartRate * vitals.systolic;
@@ -603,6 +619,14 @@ export function deriveSimulation(
                 0,
                 1,
               )
+            : disease.id === "mitral-regurgitation"
+              ? clamp(
+                  mitralRegurgitation.regurgitantFraction * 0.62 +
+                    mitralRegurgitation.leftAtrialDilation * 0.2 +
+                    mitralRegurgitation.leftVentricularDilation * 0.18,
+                  0,
+                  1,
+                )
         : genericRiskIndex;
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
@@ -638,11 +662,20 @@ export function deriveSimulation(
                     0,
                     100,
                   )
+                : disease.id === "mitral-regurgitation"
+                  ? clamp(
+                      (mitralRegurgitation.regurgitantFraction / 0.6) * 78 +
+                        mitralRegurgitation.leftAtrialDilation * 12 +
+                        mitralRegurgitation.leftVentricularDilation * 10,
+                      0,
+                      100,
+                    )
           : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression =
     disease.id === "infarction" ||
     disease.id === "heart-failure" ||
-    disease.id === "aortic-stenosis"
+    disease.id === "aortic-stenosis" ||
+    disease.id === "mitral-regurgitation"
       ? 0
       : clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
@@ -714,6 +747,11 @@ export function deriveSimulation(
     // mechanics deteriorate under chronic pressure overload.
     contractility = aorticStenosis.contractility;
   }
+  if (disease.id === "mitral-regurgitation") {
+    // Compensated primary MR can look hyperdynamic because LVEF includes the
+    // low-impedance regurgitant volume, not only useful aortic output.
+    contractility = mitralRegurgitation.contractility;
+  }
   if (disease.id === "hcm") {
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
   }
@@ -743,11 +781,7 @@ export function deriveSimulation(
             : 0.98
           : 1;
   const valvePenalty =
-    disease.id === "mitral-regurgitation"
-        ? 1 - severity01 * 0.34
-        : disease.id === "hcm"
-          ? 1 - severity01 * 0.2
-          : 1;
+    disease.id === "hcm" ? 1 - severity01 * 0.2 : 1;
   const regionalPumpPenalty =
     disease.id === "infarction"
       ? clamp(
@@ -764,6 +798,8 @@ export function deriveSimulation(
       ? clamp(heartFailure.strokeVolume, 18, 105)
       : disease.id === "aortic-stenosis"
         ? clamp(aorticStenosis.strokeVolume, 18, 105)
+        : disease.id === "mitral-regurgitation"
+          ? clamp(mitralRegurgitation.forwardStrokeVolume, 18, 105)
       : clamp(
           74 *
             contractility *
@@ -816,6 +852,8 @@ export function deriveSimulation(
     ejectionFraction = heartFailure.ejectionFraction;
   } else if (disease.id === "aortic-stenosis") {
     ejectionFraction = aorticStenosis.ejectionFraction;
+  } else if (disease.id === "mitral-regurgitation") {
+    ejectionFraction = mitralRegurgitation.ejectionFraction;
   } else if (disease.id === "hcm") {
     ejectionFraction = clamp(67 + severity01 * 6, 62, 78);
   }
@@ -868,6 +906,20 @@ export function deriveSimulation(
       activeRisks.push("hipertrofia concéntrica");
     }
   }
+  if (disease.id === "mitral-regurgitation") {
+    activeRisks.push(
+      `volumen regurgitante ${Math.round(mitralRegurgitation.regurgitantVolume)} mL`,
+    );
+    if (mitralRegurgitation.leftAtrialDilation > 0.46) {
+      activeRisks.push("aurícula izquierda dilatada");
+    }
+    if (mitralRegurgitation.leftVentricularDilation > 0.42) {
+      activeRisks.push("VI dilatado por volumen");
+    }
+    if (mitralRegurgitation.pulmonaryVenousFlow === "systolic-reversal") {
+      activeRisks.push("reversión sistólica venosa pulmonar");
+    }
+  }
   if (disease.id === "infarction" && infarction.occlusiveLoad > 0.55) {
     activeRisks.push("oclusión aguda de la DA");
   }
@@ -905,6 +957,7 @@ export function deriveSimulation(
     infarction,
     heartFailure,
     aorticStenosis,
+    mitralRegurgitation,
     heartRate,
     atrialRate,
     avBlockStage,

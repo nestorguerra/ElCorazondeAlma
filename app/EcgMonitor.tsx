@@ -8,6 +8,7 @@ import { heartFailureEcgValue } from "./heartFailureModel";
 import type { HeartMotionTelemetry } from "./heartMotion";
 import { ischemiaEcgValue } from "./ischemiaModel";
 import { infarctionEcgValue } from "./infarctionModel";
+import { mitralRegurgitationEcgValue } from "./mitralRegurgitationModel";
 import type { Disease, DerivedSimulation, EcgPattern } from "./simulation";
 import { vtEcgValue, type EcgLead as Lead } from "./vtModel";
 
@@ -160,12 +161,19 @@ function ecgValue(
     );
   }
 
+  if (pattern === "mitral-regurgitation") {
+    return mitralRegurgitationEcgValue(
+      time,
+      safeRate,
+      lead,
+      simulation.mitralRegurgitation.leftAtrialDilation,
+      simulation.mitralRegurgitation.leftVentricularDilation,
+    );
+  }
+
   let value = baseWave(phase, lead);
 
-  if (pattern === "mitral-regurgitation") {
-    value += 0.1 * severity01 * gaussian(phase, 0.19, 0.023);
-    value += 0.05 * severity01 * plateau(phase, 0.14, 0.2, 0.012);
-  } else if (pattern === "pericarditis") {
+  if (pattern === "pericarditis") {
     const diffuse = lead === "V2" ? 0.88 : 1;
     value -= 0.1 * severity01 * diffuse * plateau(phase, 0.18, 0.27, 0.013);
     value += 0.3 * severity01 * diffuse * plateau(phase, 0.35, 0.52, 0.024);
@@ -404,6 +412,10 @@ export function EcgMonitor({
                     ? simulation.aorticStenosis.ecgRemodeling >= 0.45
                       ? "Voltaje de HVI · QRS estrecho"
                       : "Estrecho · voltaje no diagnóstico"
+                    : disease.id === "mitral-regurgitation"
+                      ? simulation.mitralRegurgitation.leftVentricularDilation >= 0.48
+                        ? "Estrecho · voltaje de VI posible"
+                        : "Estrecho · sin cambio obligatorio"
               : disease.qrsLabel}
           </strong>
         </div>
@@ -413,6 +425,8 @@ export function EcgMonitor({
               ? "Ondas P"
               : disease.id === "av-block"
                 ? "Relación P–QRS"
+                : disease.id === "mitral-regurgitation"
+                  ? "Onda P"
                 : "ST–T"}
           </span>
           <strong>
@@ -438,6 +452,10 @@ export function EcgMonitor({
                       ? simulation.aorticStenosis.ecgRemodeling >= 0.5
                         ? "Sobrecarga lateral en V5"
                         : "Sin patrón específico obligatorio"
+                      : disease.id === "mitral-regurgitation"
+                        ? simulation.mitralRegurgitation.leftAtrialDilation >= 0.46
+                          ? "Ancha y mellada en DII · AI dilatada"
+                          : "Sin cambio auricular obligatorio"
                 : disease.stLabel}
           </strong>
         </div>

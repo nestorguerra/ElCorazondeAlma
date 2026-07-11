@@ -684,6 +684,8 @@ function HeartModel({
   const aorticFlow = useRef<THREE.Group>(null);
   const aorticValveOrifice = useRef<THREE.Group>(null);
   const backFlow = useRef<THREE.Group>(null);
+  const mitralForwardFlow = useRef<THREE.Group>(null);
+  const mitralValveLeaflets = useRef<THREE.Group>(null);
   const electricPulse = useRef<THREE.Mesh>(null);
   const lesionPatch = useRef<THREE.Mesh>(null);
   const phase = useRef(0);
@@ -700,8 +702,15 @@ function HeartModel({
     disease.id === "aortic-stenosis"
       ? simulation.aorticStenosis.concentricHypertrophy
       : 0;
+  const mitralLvDilation =
+    disease.id === "mitral-regurgitation"
+      ? simulation.mitralRegurgitation.leftVentricularDilation
+      : 0;
+  const mitralLaDilation =
+    disease.id === "mitral-regurgitation"
+      ? simulation.mitralRegurgitation.leftAtrialDilation
+      : 0;
   const septalGrowth = disease.id === "hcm" ? severity * 0.35 : 0;
-  const atrialGrowth = disease.id === "mitral-regurgitation" ? severity * 0.16 : 0;
   const ischemiaVisibility =
     disease.id === "ischemia"
       ? smoothStep01((severity - 0.18) / 0.64)
@@ -895,9 +904,18 @@ function HeartModel({
       ventricularAssembly.current?.position.set(0, 0, 0);
       ventricularAssembly.current?.rotation.set(0, 0, 0);
       ventricularAssembly.current?.scale.set(
-        1 + dilation * 0.18 + concentricHypertrophy * 0.055,
-        1 + dilation * 0.1 - concentricHypertrophy * 0.018,
-        1 + dilation * 0.14 + concentricHypertrophy * 0.05,
+        1 +
+          dilation * 0.18 +
+          concentricHypertrophy * 0.055 +
+          mitralLvDilation * 0.11,
+        1 +
+          dilation * 0.1 -
+          concentricHypertrophy * 0.018 +
+          mitralLvDilation * 0.07,
+        1 +
+          dilation * 0.14 +
+          concentricHypertrophy * 0.05 +
+          mitralLvDilation * 0.1,
       );
       aorticValveOrifice.current?.scale.setScalar(
         0.34 + simulation.aorticStenosis.valveOpeningFraction * 0.72,
@@ -908,6 +926,11 @@ function HeartModel({
           layer?.rotation.set(0, 0, 0);
           layer?.scale.set(1, 1, 1);
         },
+      );
+      atrialAssembly.current?.scale.set(
+        1 + mitralLaDilation * 0.16,
+        1 + mitralLaDilation * 0.13,
+        1 + mitralLaDilation * 0.15,
       );
       [coronaryLayer.current, posteriorCoronaryLayer.current].forEach(
         (layer, index) => {
@@ -937,6 +960,21 @@ function HeartModel({
       aorticFlow.current?.children.forEach((particle) => {
         particle.visible = false;
       });
+      backFlow.current?.children.forEach((particle) => {
+        particle.visible = false;
+      });
+      mitralForwardFlow.current?.children.forEach((particle) => {
+        particle.visible = false;
+      });
+      if (mitralValveLeaflets.current) {
+        const residualGap =
+          0.026 +
+          simulation.mitralRegurgitation.coaptationGapFraction * 0.09;
+        const [anteriorLeaflet, posteriorLeaflet] =
+          mitralValveLeaflets.current.children;
+        if (anteriorLeaflet) anteriorLeaflet.position.x = -residualGap;
+        if (posteriorLeaflet) posteriorLeaflet.position.x = residualGap;
+      }
       return;
     }
     if (paused) return;
@@ -1037,11 +1075,20 @@ function HeartModel({
 
     if (ventricularAssembly.current) {
       const dilatedX =
-        1 + dilation * 0.18 + concentricHypertrophy * 0.055;
+        1 +
+        dilation * 0.18 +
+        concentricHypertrophy * 0.055 +
+        mitralLvDilation * 0.11;
       const dilatedY =
-        1 + dilation * 0.1 - concentricHypertrophy * 0.018;
+        1 +
+        dilation * 0.1 -
+        concentricHypertrophy * 0.018 +
+        mitralLvDilation * 0.07;
       const dilatedZ =
-        1 + dilation * 0.14 + concentricHypertrophy * 0.05;
+        1 +
+        dilation * 0.14 +
+        concentricHypertrophy * 0.05 +
+        mitralLvDilation * 0.1;
       ventricularAssembly.current.scale.set(
         dilatedX,
         dilatedY,
@@ -1091,9 +1138,12 @@ function HeartModel({
           : 0;
       const atrialContraction = atrialSystole * 0.065;
       atrialAssembly.current.scale.set(
-        1 - atrialContraction + fibrillationX,
-        1 - atrialContraction * 0.72 - fibrillationZ * 0.28,
-        1 - atrialContraction + fibrillationZ,
+        (1 + mitralLaDilation * 0.16) *
+          (1 - atrialContraction + fibrillationX),
+        (1 + mitralLaDilation * 0.13) *
+          (1 - atrialContraction * 0.72 - fibrillationZ * 0.28),
+        (1 + mitralLaDilation * 0.15) *
+          (1 - atrialContraction + fibrillationZ),
       );
       atrialAssembly.current.rotation.y = fibrillationX * 0.65;
     }
@@ -1247,12 +1297,76 @@ function HeartModel({
 
     if (backFlow.current) {
       backFlow.current.children.forEach((particle, index) => {
-        particle.visible = ventricularSystole > 0.07;
+        const regurgitantFraction =
+          simulation.mitralRegurgitation.regurgitantFraction;
+        const visibleParticles =
+          4 + Math.round(regurgitantFraction * 20);
+        particle.visible =
+          ventricularSystole > 0.07 && index < visibleParticles;
         const progress =
-          (state.clock.elapsedTime * 0.48 + index / 8) % 1;
+          (state.clock.elapsedTime *
+            (0.26 +
+              simulation.mitralRegurgitation.regurgitantJetVelocity * 0.055) +
+            index / 16) %
+          1;
         particle.position.copy(mitralBackflowCurve.getPointAt(progress));
-        particle.scale.setScalar(0.58 + ventricularSystole * 0.62);
+        const wallHuggingSpread =
+          simulation.mitralRegurgitation.coaptationGapFraction *
+          Math.sin(index * 2.37 + state.clock.elapsedTime * 9) *
+          0.045 *
+          progress;
+        particle.position.x += wallHuggingSpread;
+        particle.position.z +=
+          simulation.mitralRegurgitation.coaptationGapFraction *
+          0.05 *
+          progress;
+        particle.scale.setScalar(
+          0.42 +
+            ventricularSystole * 0.42 +
+            regurgitantFraction * 0.28,
+        );
+        const material = (particle as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        material.opacity = 0.42 + ventricularSystole * 0.46;
       });
+    }
+
+    if (mitralForwardFlow.current) {
+      mitralForwardFlow.current.children.forEach((particle, index) => {
+        const forwardFraction = Math.min(
+          1,
+          Math.max(
+            0,
+            simulation.mitralRegurgitation.forwardStrokeVolume / 78,
+          ),
+        );
+        const visibleParticles = Math.max(4, Math.round(14 * forwardFraction));
+        particle.visible =
+          ventricularSystole > 0.07 && index < visibleParticles;
+        const progress =
+          (state.clock.elapsedTime * (0.24 + forwardFraction * 0.18) +
+            index / 14) %
+          1;
+        particle.position.copy(aortaCurve.getPointAt(progress));
+        particle.scale.setScalar(0.46 + ventricularSystole * 0.34);
+        const material = (particle as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        material.opacity = 0.4 + forwardFraction * 0.45;
+      });
+    }
+
+    if (mitralValveLeaflets.current) {
+      const openDistance = 0.15;
+      const residualGap =
+        0.026 +
+        simulation.mitralRegurgitation.coaptationGapFraction * 0.09;
+      const leafletDistance =
+        openDistance * (1 - ventricularSystole) +
+        residualGap * ventricularSystole;
+      const [anteriorLeaflet, posteriorLeaflet] =
+        mitralValveLeaflets.current.children;
+      if (anteriorLeaflet) anteriorLeaflet.position.x = -leafletDistance;
+      if (posteriorLeaflet) posteriorLeaflet.position.x = leafletDistance;
     }
 
     if (pericardialLayer.current) {
@@ -1485,26 +1599,28 @@ function HeartModel({
       </group>
 
       <group ref={atrialAssembly}>
-        {(region === "atria" || disease.id === "afib") && (
+        {(atriaActive || disease.id === "afib") && (
           <>
-            <mesh
-              position={[-0.38, 1.03, 1.11]}
-              rotation={[0, 0, 0.13]}
-              scale={[1.08, 1.28, 1]}
-            >
-              <torusGeometry args={[0.2, 0.022, 18, 72]} />
-              <meshBasicMaterial
-                color={activeColor}
-                transparent
-                opacity={0.5 + severity * 0.25}
-                depthWrite={false}
-                blending={THREE.AdditiveBlending}
-              />
-            </mesh>
+            {(region === "atria" || disease.id === "afib") && (
+              <mesh
+                position={[-0.38, 1.03, 1.11]}
+                rotation={[0, 0, 0.13]}
+                scale={[1.08, 1.28, 1]}
+              >
+                <torusGeometry args={[0.2, 0.022, 18, 72]} />
+                <meshBasicMaterial
+                  color={activeColor}
+                  transparent
+                  opacity={0.5 + severity * 0.25}
+                  depthWrite={false}
+                  blending={THREE.AdditiveBlending}
+                />
+              </mesh>
+            )}
             <mesh
               position={[0.4, 1.08, 1.1]}
               rotation={[0, 0, -0.12]}
-              scale={[1.08 + atrialGrowth, 1.24 + atrialGrowth, 1]}
+              scale={[1.08, 1.24, 1]}
             >
               <torusGeometry args={[0.2, 0.022, 18, 72]} />
               <meshBasicMaterial
@@ -1515,12 +1631,14 @@ function HeartModel({
                 blending={THREE.AdditiveBlending}
               />
             </mesh>
-            <pointLight
-              color={activeColor}
-              intensity={0.25 + severity * 0.45}
-              distance={0.85}
-              position={[-0.38, 1.03, 1.32]}
-            />
+            {(region === "atria" || disease.id === "afib") && (
+              <pointLight
+                color={activeColor}
+                intensity={0.25 + severity * 0.45}
+                distance={0.85}
+                position={[-0.38, 1.03, 1.32]}
+              />
+            )}
             <pointLight
               color={activeColor}
               intensity={0.25 + severity * 0.45}
@@ -1602,17 +1720,48 @@ function HeartModel({
         )}
 
         {valveMitralActive && (
-          <mesh
+          <group
             position={[0.23, 0.58, 0.48]}
             rotation={[Math.PI / 2, -0.08, 0]}
           >
-            <torusGeometry args={[0.245, 0.04, 14, 44]} />
-            <meshStandardMaterial
-              color={activeColor}
-              emissive={activeColor}
-              emissiveIntensity={0.95}
-            />
-          </mesh>
+            <mesh>
+              <torusGeometry args={[0.245, 0.034, 16, 52]} />
+              <meshStandardMaterial
+                color={activeColor}
+                emissive={activeColor}
+                emissiveIntensity={0.72}
+                roughness={0.48}
+              />
+            </mesh>
+            <group ref={mitralValveLeaflets}>
+              <mesh
+                position={[-0.15, 0, 0]}
+                scale={[0.12, 0.052, 0.036]}
+              >
+                <sphereGeometry args={[1, 28, 18]} />
+                <meshPhysicalMaterial
+                  color="#f0b7aa"
+                  roughness={0.5}
+                  clearcoat={0.22}
+                  emissive={activeColor}
+                  emissiveIntensity={0.12}
+                />
+              </mesh>
+              <mesh
+                position={[0.15, 0, 0]}
+                scale={[0.12, 0.052, 0.036]}
+              >
+                <sphereGeometry args={[1, 28, 18]} />
+                <meshPhysicalMaterial
+                  color="#f0b7aa"
+                  roughness={0.5}
+                  clearcoat={0.22}
+                  emissive={activeColor}
+                  emissiveIntensity={0.12}
+                />
+              </mesh>
+            </group>
+          </group>
         )}
       </group>
 
@@ -1643,18 +1792,32 @@ function HeartModel({
       )}
 
       {disease.id === "mitral-regurgitation" && (
-        <group ref={backFlow}>
-          {Array.from({ length: 8 }).map((_, index) => (
-            <mesh key={index}>
-              <sphereGeometry args={[0.05 + severity * 0.022, 12, 10]} />
-              <meshBasicMaterial
-                color={activeColor}
-                transparent
-                opacity={0.88}
-              />
-            </mesh>
-          ))}
-        </group>
+        <>
+          <group ref={backFlow}>
+            {Array.from({ length: 16 }).map((_, index) => (
+              <mesh key={index}>
+                <sphereGeometry args={[0.04, 14, 10]} />
+                <meshBasicMaterial
+                  color="#52d9ff"
+                  transparent
+                  opacity={0.82}
+                />
+              </mesh>
+            ))}
+          </group>
+          <group ref={mitralForwardFlow}>
+            {Array.from({ length: 14 }).map((_, index) => (
+              <mesh key={index}>
+                <sphereGeometry args={[0.029, 14, 10]} />
+                <meshBasicMaterial
+                  color="#72efc5"
+                  transparent
+                  opacity={0.72}
+                />
+              </mesh>
+            ))}
+          </group>
+        </>
       )}
 
       {disease.id === "pericarditis" && (

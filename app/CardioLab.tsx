@@ -158,8 +158,16 @@ const SOURCES = [
     href: "https://academic.oup.com/eurheartj/article/44/1/28/6724464",
   },
   {
-    label: "AHA · Insuficiencia mitral",
-    href: "https://www.heart.org/en/health-topics/heart-valve-problems-and-disease/heart-valve-problems-and-causes/problem-mitral-valve-regurgitation",
+    label: "ESC/EACTS 2025 · Insuficiencia mitral primaria",
+    href: "https://academic.oup.com/eurheartj/article/46/44/4635/8234488",
+  },
+  {
+    label: "ASE/SCMR · Cuantificación de regurgitación valvular nativa",
+    href: "https://www.asecho.org/wp-content/uploads/2025/04/2017VavularRegurgitationGuideline.pdf",
+  },
+  {
+    label: "ESC · Mecanismo y remodelado en insuficiencia mitral primaria",
+    href: "https://www.escardio.org/communities/councils/cardiology-practice/education/cardiopractice/primary-mitral-regurgitation-answers-to-clinical-cardiologists-most-common-que/",
   },
   {
     label: "ESC · Diagnóstico de pericarditis aguda",
@@ -253,7 +261,7 @@ const MOTION_FOCUS: Record<DiseaseId, string> = {
   infarction: "Núcleo anterior-apical: hipocinesia → akinesia",
   "heart-failure": "VI dilatado: acortamiento y engrosamiento global reducidos",
   "aortic-stenosis": "Eyección prolongada · VI con hipertrofia concéntrica",
-  "mitral-regurgitation": "Válvula mitral: flujo retrógrado en sístole",
+  "mitral-regurgitation": "Sístole: flujo aórtico útil + chorro retrógrado hacia AI",
   pericarditis: "Pericardio: expansión más restringida",
   hcm: "Septo: engrosamiento y cavidad reducida",
 };
@@ -405,6 +413,18 @@ function CardiacMotionGuide({
           <span>
             Gradiente medio {Math.round(simulation.aorticStenosis.meanGradient)} mmHg
             {" · "}VI ≈ {Math.round(simulation.aorticStenosis.lvSystolicPressure)} mmHg
+          </span>
+        </span>
+      )}
+      {disease.id === "mitral-regurgitation" && !movementPaused && (
+        <span className="rhythm-motion-readout">
+          <span>
+            Volumen total {Math.round(simulation.mitralRegurgitation.totalStrokeVolume)} ·
+            regurgitante {Math.round(simulation.mitralRegurgitation.regurgitantVolume)} mL
+          </span>
+          <span>
+            Volumen aórtico útil {Math.round(simulation.mitralRegurgitation.forwardStrokeVolume)} mL
+            {" · "}FE total {Math.round(simulation.mitralRegurgitation.ejectionFraction)}%
           </span>
         </span>
       )}
@@ -953,6 +973,8 @@ export default function CardioLab() {
                       ? "Remodelado y dilatación basal"
                       : disease.id === "aortic-stenosis"
                         ? "Remodelado ventricular acumulado"
+                        : disease.id === "mitral-regurgitation"
+                          ? "Remodelado aurículo-ventricular acumulado"
                   : disease.id === "afib" ||
                       disease.id === "vt" ||
                       disease.id === "av-block"
@@ -1001,6 +1023,8 @@ export default function CardioLab() {
                     ? "Estado ventricular"
                     : disease.id === "aortic-stenosis"
                       ? "Clasificación integrada"
+                      : disease.id === "mitral-regurgitation"
+                        ? "Grado integrado de IM"
                 : disease.id === "afib" ||
                     disease.id === "vt" ||
                     disease.id === "av-block"
@@ -1011,7 +1035,8 @@ export default function CardioLab() {
               className={
                 disease.id === "infarction" ||
                 disease.id === "heart-failure" ||
-                disease.id === "aortic-stenosis"
+                disease.id === "aortic-stenosis" ||
+                disease.id === "mitral-regurgitation"
                   ? "stage-label"
                   : undefined
               }
@@ -1022,6 +1047,8 @@ export default function CardioLab() {
                   ? simulation.heartFailure.stageLabel
                   : disease.id === "aortic-stenosis"
                     ? simulation.aorticStenosis.stageLabel
+                    : disease.id === "mitral-regurgitation"
+                      ? simulation.mitralRegurgitation.stageLabel
                 : `${Math.round(simulation.severity)}%`}
             </strong>
             <small>
@@ -1039,6 +1066,8 @@ export default function CardioLab() {
                         ? `FE = (VTD − VTS) / VTD · volumen residual ${Math.round(simulation.heartFailure.residualVolumeFraction * 100)}%`
                       : disease.id === "aortic-stenosis"
                         ? `AVA ${simulation.aorticStenosis.valveArea.toFixed(1)} cm² · Vmáx ${simulation.aorticStenosis.peakVelocity.toFixed(1)} m/s · gradiente medio ${Math.round(simulation.aorticStenosis.meanGradient)} mmHg · SVi ${Math.round(simulation.aorticStenosis.strokeVolumeIndex)} mL/m² · FE ${Math.round(simulation.aorticStenosis.ejectionFraction)}%`
+                      : disease.id === "mitral-regurgitation"
+                        ? `FR ${Math.round(simulation.mitralRegurgitation.regurgitantFraction * 100)}% · VReg ${Math.round(simulation.mitralRegurgitation.regurgitantVolume)} mL · ORE ${simulation.mitralRegurgitation.effectiveRegurgitantOrificeArea.toFixed(2)} cm² · flujo útil ${Math.round(simulation.mitralRegurgitation.forwardStrokeVolume)} mL · FE total ${Math.round(simulation.mitralRegurgitation.ejectionFraction)}%`
                     : "base + variable propia + tiempo + modificadores"}
             </small>
           </div>
