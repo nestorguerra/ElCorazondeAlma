@@ -692,6 +692,10 @@ function HeartModel({
   const elapsedSeconds = useRef(0);
 
   const severity = simulation.severity / 100;
+  const pericardialVisibility =
+    disease.id === "pericarditis"
+      ? simulation.pericarditis.pericardialVisibility
+      : 0;
   const activeColor = disease.color;
   const region = disease.region;
   const dilation =
@@ -834,14 +838,15 @@ function HeartModel({
     pericardialAsset.materials.forEach((material) => {
       material.color.set(activeColor);
       material.emissive.set(activeColor);
-      material.opacity = 0.055 + severity * 0.11;
-      material.emissiveIntensity = 0.18 + severity * 0.42;
+      material.opacity = 0.045 + pericardialVisibility * 0.15;
+      material.emissiveIntensity = 0.16 + pericardialVisibility * 0.5;
     });
   }, [
     activeColor,
     anatomicalAsset,
     atriaActive,
     pericardialAsset,
+    pericardialVisibility,
     severity,
     ventActive,
   ]);
@@ -975,6 +980,7 @@ function HeartModel({
         if (anteriorLeaflet) anteriorLeaflet.position.x = -residualGap;
         if (posteriorLeaflet) posteriorLeaflet.position.x = residualGap;
       }
+      pericardialLayer.current?.scale.setScalar(4.61);
       return;
     }
     if (paused) return;
@@ -1370,8 +1376,24 @@ function HeartModel({
     }
 
     if (pericardialLayer.current) {
-      const restrictedMotion = 1 - ventricularSystole * 0.006 * (1 - severity);
-      pericardialLayer.current.scale.setScalar(4.61 * restrictedMotion);
+      // Acute uncomplicated pericarditis inflames the surrounding sac but
+      // does not mechanically squeeze otherwise normal myocardium.
+      pericardialLayer.current.scale.setScalar(4.61);
+      const inflammatoryShimmer =
+        0.5 + 0.5 * Math.sin(elapsedSeconds.current * 1.35);
+      pericardialAsset.materials.forEach((material, index) => {
+        const localShimmer =
+          0.5 +
+          0.5 *
+            Math.sin(elapsedSeconds.current * 1.35 + index * 0.47);
+        material.opacity =
+          0.045 +
+          pericardialVisibility * (0.135 + localShimmer * 0.025);
+        material.emissiveIntensity =
+          0.16 +
+          pericardialVisibility *
+            (0.42 + inflammatoryShimmer * 0.12);
+      });
     }
 
     if (electricPulse.current) {

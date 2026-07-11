@@ -9,6 +9,7 @@ import type { HeartMotionTelemetry } from "./heartMotion";
 import { ischemiaEcgValue } from "./ischemiaModel";
 import { infarctionEcgValue } from "./infarctionModel";
 import { mitralRegurgitationEcgValue } from "./mitralRegurgitationModel";
+import { pericarditisEcgValue } from "./pericarditisModel";
 import type { Disease, DerivedSimulation, EcgPattern } from "./simulation";
 import { vtEcgValue, type EcgLead as Lead } from "./vtModel";
 
@@ -33,14 +34,6 @@ type EcgRuntime = {
 function gaussian(x: number, center: number, width: number) {
   const z = (x - center) / width;
   return Math.exp(-0.5 * z * z);
-}
-
-function sigmoid(value: number) {
-  return 1 / (1 + Math.exp(-value));
-}
-
-function plateau(x: number, start: number, end: number, edge = 0.012) {
-  return sigmoid((x - start) / edge) - sigmoid((x - end) / edge);
 }
 
 function leadModifier(lead: Lead, pattern: EcgPattern) {
@@ -171,13 +164,18 @@ function ecgValue(
     );
   }
 
+  if (pattern === "pericarditis") {
+    return pericarditisEcgValue(
+      time,
+      safeRate,
+      lead,
+      simulation.pericarditis,
+    );
+  }
+
   let value = baseWave(phase, lead);
 
-  if (pattern === "pericarditis") {
-    const diffuse = lead === "V2" ? 0.88 : 1;
-    value -= 0.1 * severity01 * diffuse * plateau(phase, 0.18, 0.27, 0.013);
-    value += 0.3 * severity01 * diffuse * plateau(phase, 0.35, 0.52, 0.024);
-  } else if (pattern === "hcm") {
+  if (pattern === "hcm") {
     value += 0.82 * severity01 * gaussian(phase, 0.31, 0.01);
     value -= 0.4 * severity01 * gaussian(phase, 0.275, 0.018);
     value -= 0.5 * severity01 * gaussian(phase, 0.59, 0.068);

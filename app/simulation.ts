@@ -18,6 +18,11 @@ import {
   EMPTY_MITRAL_REGURGITATION_PROGRESSION,
   type MitralRegurgitationProgression,
 } from "./mitralRegurgitationModel.ts";
+import {
+  derivePericarditisProgression,
+  EMPTY_PERICARDITIS_PROGRESSION,
+  type PericarditisProgression,
+} from "./pericarditisModel.ts";
 
 type AvBlockStage = 1 | 2 | 3 | 4;
 
@@ -115,6 +120,7 @@ export type DerivedSimulation = {
   heartFailure: HeartFailureProgression;
   aorticStenosis: AorticStenosisProgression;
   mitralRegurgitation: MitralRegurgitationProgression;
+  pericarditis: PericarditisProgression;
   heartRate: number;
   atrialRate: number;
   avBlockStage: AvBlockStage;
@@ -421,34 +427,34 @@ export const DISEASES: Disease[] = [
   {
     id: "pericarditis",
     code: "PER",
-    name: "Pericarditis aguda",
+    name: "Pericarditis aguda · no complicada",
     family: "Inflamación",
     color: "#f47ebb",
     region: "pericardium",
     regionLabel: "pericardio",
     pattern: "pericarditis",
     summary:
-      "El saco que rodea al corazón se inflama; puede existir o no derrame.",
+      "El pericardio se inflama sin miocarditis, derrame significativo ni taponamiento.",
     heartLesson:
-      "La capa rosa marca el pericardio inflamado. El miocardio conserva su movimiento en el caso simple.",
+      "La capa rosa marca inflamación pericárdica difusa. El miocardio conserva contracción y volúmenes normales.",
     ecgLesson:
-      "Busca elevación difusa y cóncava del ST con descenso del PR, sin seguir una sola arteria.",
+      "Sigue la secuencia clásica: ST cóncavo y PR descendido, normalización, inversión de T y recuperación.",
     causalLesson:
-      "La fiebre acompaña algunos cuadros y eleva la frecuencia, pero no determina por sí sola la gravedad.",
+      "La fiebre puede acelerar el ritmo sin convertir la inflamación pericárdica en disfunción miocárdica.",
     caveat:
-      "El patrón ECG típico no aparece en todos los casos. Pericarditis, derrame y taponamiento no son equivalentes.",
+      "El ECG típico aparece solo en una parte de los casos. Este fenotipo excluye miopericarditis, derrame relevante, taponamiento y constricción.",
     rhythmLabel: "Sinusal",
     qrsLabel: "Estrecho",
     stLabel: "ST difuso + PR descendido",
-    mechanicalLoss: 0.1,
-    progressionRate: 0.22,
+    mechanicalLoss: 0,
+    progressionRate: 0,
     timeUnit: "días",
     specific: {
-      label: "Inflamación pericárdica",
-      min: 10,
+      label: "Expresión del patrón ECG típico",
+      min: 0,
       max: 100,
       step: 1,
-      defaultValue: 52,
+      defaultValue: 70,
       unit: "%",
     },
   },
@@ -564,6 +570,14 @@ export function deriveSimulation(
           vitals.systolic,
         )
       : EMPTY_MITRAL_REGURGITATION_PROGRESSION;
+  const pericarditis =
+    disease.id === "pericarditis"
+      ? derivePericarditisProgression(
+          baseSeverity,
+          specificValue,
+          clinicalTime,
+        )
+      : EMPTY_PERICARDITIS_PROGRESSION;
   const demandHeartRate =
     vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7;
   const ratePressureProduct = demandHeartRate * vitals.systolic;
@@ -627,6 +641,8 @@ export function deriveSimulation(
                   0,
                   1,
                 )
+              : disease.id === "pericarditis"
+                ? pericarditis.inflammationFraction
         : genericRiskIndex;
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
@@ -670,12 +686,15 @@ export function deriveSimulation(
                       0,
                       100,
                     )
+                  : disease.id === "pericarditis"
+                    ? pericarditis.inflammationFraction * 100
           : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression =
     disease.id === "infarction" ||
     disease.id === "heart-failure" ||
     disease.id === "aortic-stenosis" ||
-    disease.id === "mitral-regurgitation"
+    disease.id === "mitral-regurgitation" ||
+    disease.id === "pericarditis"
       ? 0
       : clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
@@ -756,7 +775,7 @@ export function deriveSimulation(
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
   }
   if (disease.id === "pericarditis") {
-    contractility = clamp(1 - 0.08 * severity01, 0.82, 1);
+    contractility = pericarditis.contractility;
   }
 
   const afterloadPenalty = clamp(
@@ -854,6 +873,8 @@ export function deriveSimulation(
     ejectionFraction = aorticStenosis.ejectionFraction;
   } else if (disease.id === "mitral-regurgitation") {
     ejectionFraction = mitralRegurgitation.ejectionFraction;
+  } else if (disease.id === "pericarditis") {
+    ejectionFraction = pericarditis.ejectionFraction;
   } else if (disease.id === "hcm") {
     ejectionFraction = clamp(67 + severity01 * 6, 62, 78);
   }
@@ -920,6 +941,12 @@ export function deriveSimulation(
       activeRisks.push("reversión sistólica venosa pulmonar");
     }
   }
+  if (disease.id === "pericarditis") {
+    activeRisks.push("inflamación pericárdica");
+    if (pericarditis.typicalEcgExpression > 0.1) {
+      activeRisks.push("patrón ST–PR difuso");
+    }
+  }
   if (disease.id === "infarction" && infarction.occlusiveLoad > 0.55) {
     activeRisks.push("oclusión aguda de la DA");
   }
@@ -944,7 +971,7 @@ export function deriveSimulation(
     (disease.id === "av-block" && avBlockStage >= 3) ||
     currentSystolic < 102 ||
     cardiacOutput < 3.8 ||
-    severity > 72
+    (severity > 72 && disease.id !== "pericarditis")
   ) {
     stability = "Vigilancia";
     stabilityTone = "watch";
@@ -958,6 +985,7 @@ export function deriveSimulation(
     heartFailure,
     aorticStenosis,
     mitralRegurgitation,
+    pericarditis,
     heartRate,
     atrialRate,
     avBlockStage,
