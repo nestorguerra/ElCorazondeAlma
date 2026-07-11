@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Activity,
   AlertTriangle,
   BookOpen,
   Clock3,
@@ -30,7 +29,9 @@ import {
   type ReactNode,
 } from "react";
 import { EcgMonitor } from "./EcgMonitor";
+import { GuidedLesson } from "./GuidedLesson";
 import { HeartScene } from "./HeartScene";
+import { ScenarioBar } from "./ScenarioBar";
 import {
   createHeartMotionTelemetry,
   type CardiacStage,
@@ -40,13 +41,22 @@ import {
   DEFAULT_VITALS,
   DISEASES,
   deriveSimulation,
-  formatSpecific,
   getDisease,
   type Disease,
   type DiseaseId,
   type DerivedSimulation,
   type Vitals,
 } from "./simulation";
+import {
+  DEFAULT_SCENARIO,
+  normalizeSpecificValue,
+  parseScenarioSearch,
+  serializeScenarioSearch,
+  specificToSeverity,
+  type GuidedStep,
+  type ScenarioMode,
+} from "./scenario";
+import type { EcgLead } from "./vtModel";
 
 type VitalControlProps = {
   icon: ReactNode;
@@ -325,29 +335,6 @@ function severityLabel(value: number) {
   return "severa";
 }
 
-function severityToSpecific(disease: Disease, severity: number) {
-  const visualFraction = Math.min(1, Math.max(0, severity / 100));
-  const specificFraction = disease.specific.inverse
-    ? 1 - visualFraction
-    : visualFraction;
-  const raw =
-    disease.specific.min +
-    (disease.specific.max - disease.specific.min) * specificFraction;
-  const stepped =
-    Math.round((raw - disease.specific.min) / disease.specific.step) *
-      disease.specific.step +
-    disease.specific.min;
-  return Math.min(disease.specific.max, Math.max(disease.specific.min, stepped));
-}
-
-function defaultSeverityForDisease(disease: Disease) {
-  if (disease.id === "healthy") return 0;
-  const fraction =
-    (disease.specific.defaultValue - disease.specific.min) /
-    (disease.specific.max - disease.specific.min);
-  return Math.round((disease.specific.inverse ? 1 - fraction : fraction) * 100);
-}
-
 function clinicalStage(disease: Disease, simulation: DerivedSimulation) {
   if (disease.id === "healthy") return "Referencia fisiológica";
   if (disease.id === "infarction") return simulation.infarction.stageLabel;
@@ -603,25 +590,144 @@ function formatClinicalTime(value: number, unit: Disease["timeUnit"]) {
   return `${value.toFixed(decimals)} ${unit}`;
 }
 
+function formatDelta(value: number, unit: string, decimals = 0) {
+  if (Math.abs(value) < 0.05) return "Sin cambio frente a referencia";
+  return `${value > 0 ? "+" : ""}${value.toFixed(decimals)} ${unit} frente a referencia`;
+}
+
+function ComparisonDeltas({
+  simulation,
+  healthySimulation,
+}: {
+  simulation: DerivedSimulation;
+  healthySimulation: DerivedSimulation;
+}) {
+  const metrics = [
+    {
+      label: "Frecuencia efectiva",
+      current: `${simulation.heartRate} lpm`,
+      delta: formatDelta(simulation.heartRate - healthySimulation.heartRate, "lpm"),
+    },
+    {
+      label: "Fracción de eyección",
+      current: `${Math.round(simulation.ejectionFraction)}%`,
+      delta: formatDelta(
+        simulation.ejectionFraction - healthySimulation.ejectionFraction,
+        "puntos",
+      ),
+    },
+    {
+      label: "Gasto cardíaco",
+      current: `${simulation.cardiacOutput.toFixed(1)} L/min`,
+      delta: formatDelta(
+        simulation.cardiacOutput - healthySimulation.cardiacOutput,
+        "L/min",
+        1,
+      ),
+    },
+  ];
+
+  return (
+    <div className="comparison-deltas" aria-label="Diferencias frente a la referencia sin cardiopatía">
+      {metrics.map((metric) => (
+        <div key={metric.label}>
+          <span>{metric.label}</span>
+          <strong>{metric.current}</strong>
+          <small>{metric.delta}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function CardioLab() {
   const [vitals, setVitals] = useState<Vitals>(DEFAULT_VITALS);
   const [diseaseId, setDiseaseId] = useState<DiseaseId>("healthy");
   const disease = useMemo(() => getDisease(diseaseId), [diseaseId]);
-  const [diseaseSeverity, setDiseaseSeverity] = useState(0);
-  const baseSeverity = diseaseSeverity;
-  const specificValue = useMemo(
-    () => severityToSpecific(disease, diseaseSeverity),
-    [disease, diseaseSeverity],
+  const healthyDisease = useMemo(() => getDisease("healthy"), []);
+  const [specificValue, setSpecificValue] = useState(0);
+  const baseSeverity = useMemo(
+    () => specificToSeverity(disease, specificValue),
+    [disease, specificValue],
   );
   const [clinicalTime, setClinicalTime] = useState(0);
   const [paused, setPaused] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
   const [compareHealthy, setCompareHealthy] = useState(false);
+  const [lead, setLead] = useState<EcgLead>("DII");
+  const [scenarioMode, setScenarioMode] = useState<ScenarioMode>("explore");
+  const [guidedStep, setGuidedStep] = useState<GuidedStep>(1);
+  const [shareStatus, setShareStatus] = useState("");
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  const [fullscreenActive, setFullscreenActive] = useState(false);
+  const [scenarioHydrated, setScenarioHydrated] = useState(false);
+  const [compactViewport, setCompactViewport] = useState(false);
+  const [mobileComparisonView, setMobileComparisonView] = useState<"healthy" | "disease">("disease");
   const [lessonTab, setLessonTab] = useState<LessonTab>("heart");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
   const motionTelemetry = useMemo(() => createHeartMotionTelemetry(), []);
+  const healthyMotionTelemetry = useMemo(() => createHeartMotionTelemetry(), []);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const scenario = parseScenarioSearch(window.location.search);
+    const timer = window.setTimeout(() => {
+      setVitals(scenario.vitals);
+      setDiseaseId(scenario.diseaseId);
+      setSpecificValue(scenario.specificValue);
+      setLead(scenario.lead);
+      setCompareHealthy(scenario.compareHealthy);
+      setScenarioMode(scenario.mode);
+      setGuidedStep(scenario.guidedStep);
+      setFullscreenSupported(document.fullscreenEnabled);
+      setScenarioHydrated(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = () => setCompactViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    const updateFullscreen = () =>
+      setFullscreenActive(document.fullscreenElement === workspaceRef.current);
+    document.addEventListener("fullscreenchange", updateFullscreen);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreen);
+  }, []);
+
+  useEffect(() => {
+    if (!scenarioHydrated) return;
+    const timer = window.setTimeout(() => {
+      const search = serializeScenarioSearch({
+        diseaseId,
+        specificValue,
+        vitals,
+        lead,
+        compareHealthy,
+        mode: scenarioMode,
+        guidedStep,
+      });
+      const nextUrl = `${window.location.pathname}?${search}${window.location.hash}`;
+      window.history.replaceState(null, "", nextUrl);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [
+    compareHealthy,
+    diseaseId,
+    guidedStep,
+    lead,
+    scenarioHydrated,
+    scenarioMode,
+    specificValue,
+    vitals,
+  ]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -673,6 +779,20 @@ export default function CardioLab() {
       ),
     [baseSeverity, clinicalTime, disease, specificValue, vitals],
   );
+  const healthySimulation = useMemo(
+    () => deriveSimulation(vitals, healthyDisease, 0, 0, 0),
+    [healthyDisease, vitals],
+  );
+  const comparisonActive = compareHealthy && disease.id !== "healthy";
+  const showingHealthyOnMobile =
+    comparisonActive && compactViewport && mobileComparisonView === "healthy";
+  const displayedDisease = showingHealthyOnMobile ? healthyDisease : disease;
+  const displayedSimulation = showingHealthyOnMobile
+    ? healthySimulation
+    : simulation;
+  const displayedTelemetry = showingHealthyOnMobile
+    ? healthyMotionTelemetry
+    : motionTelemetry;
 
   const setVital = useCallback(
     <Key extends keyof Vitals>(key: Key, value: Vitals[Key]) => {
@@ -684,21 +804,98 @@ export default function CardioLab() {
   const selectDisease = (nextId: DiseaseId) => {
     const next = getDisease(nextId);
     setDiseaseId(nextId);
-    setDiseaseSeverity(defaultSeverityForDisease(next));
+    setSpecificValue(next.id === "healthy" ? 0 : next.specific.defaultValue);
     setClinicalTime(0);
-    setCompareHealthy(false);
+    if (next.id === "healthy") setCompareHealthy(false);
+    setMobileComparisonView("disease");
+    setGuidedStep(1);
     setLessonTab("heart");
   };
 
+  const changeSpecificValue = (value: number) => {
+    setSpecificValue(normalizeSpecificValue(disease, value));
+    setClinicalTime(0);
+  };
+
   const resetAll = () => {
-    setVitals(DEFAULT_VITALS);
-    setDiseaseId("healthy");
-    setDiseaseSeverity(0);
+    setVitals(DEFAULT_SCENARIO.vitals);
+    setDiseaseId(DEFAULT_SCENARIO.diseaseId);
+    setSpecificValue(DEFAULT_SCENARIO.specificValue);
+    setLead(DEFAULT_SCENARIO.lead);
+    setScenarioMode(DEFAULT_SCENARIO.mode);
+    setGuidedStep(DEFAULT_SCENARIO.guidedStep);
     setClinicalTime(0);
     setPaused(false);
     setAutoRotate(false);
-    setCompareHealthy(false);
+    setCompareHealthy(DEFAULT_SCENARIO.compareHealthy);
+    setMobileComparisonView("disease");
     setLessonTab("heart");
+  };
+
+  const toggleComparison = () => {
+    setCompareHealthy((current) => !current);
+    setMobileComparisonView("disease");
+  };
+
+  const shareScenario = async () => {
+    const search = serializeScenarioSearch({
+      diseaseId,
+      specificValue,
+      vitals,
+      lead,
+      compareHealthy,
+      mode: scenarioMode,
+      guidedStep,
+    });
+    const url = `${window.location.origin}${window.location.pathname}?${search}`;
+    const copyUrl = async () => {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        return;
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = url;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("Clipboard unavailable");
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `El Corazón de Alma · ${disease.name}`,
+          text: "Escenario educativo cardíaco reproducible",
+          url,
+        });
+        setShareStatus("Compartido");
+      } else {
+        await copyUrl();
+        setShareStatus("Enlace copiado");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      try {
+        await copyUrl();
+        setShareStatus("Enlace copiado");
+      } catch {
+        setShareStatus("No se pudo copiar");
+      }
+    }
+    window.setTimeout(() => setShareStatus(""), 2200);
+  };
+
+  const toggleFullscreen = async () => {
+    if (!document.fullscreenEnabled || !workspaceRef.current) return;
+    if (document.fullscreenElement === workspaceRef.current) {
+      await document.exitFullscreen();
+      return;
+    }
+    await workspaceRef.current.requestFullscreen();
   };
 
   const lessonText =
@@ -813,12 +1010,49 @@ export default function CardioLab() {
         </div>
       </section>
 
+      <div
+        ref={workspaceRef}
+        className={`simulation-workspace ${fullscreenActive ? "is-fullscreen" : ""}`}
+      >
+        <ScenarioBar
+          disease={disease}
+          specificValue={specificValue}
+          stageLabel={clinicalStage(disease, simulation)}
+          paused={paused}
+          compareHealthy={comparisonActive}
+          mode={scenarioMode}
+          shareStatus={shareStatus}
+          fullscreenSupported={fullscreenSupported}
+          fullscreenActive={fullscreenActive}
+          onDiseaseChange={selectDisease}
+          onSpecificChange={changeSpecificValue}
+          onTogglePaused={() => setPaused((current) => !current)}
+          onToggleComparison={toggleComparison}
+          onModeChange={(mode) => {
+            setScenarioMode(mode);
+            if (mode === "guided") setGuidedStep(1);
+          }}
+          onShare={shareScenario}
+          onToggleFullscreen={toggleFullscreen}
+          onReset={resetAll}
+        />
+
+        {scenarioMode === "guided" && (
+          <GuidedLesson
+            disease={disease}
+            simulation={simulation}
+            step={guidedStep}
+            onStepChange={setGuidedStep}
+            onSpecificChange={changeSpecificValue}
+          />
+        )}
+
       <section className="lab-grid" aria-label="Simulación cardíaca y electrocardiograma">
         <article className="heart-panel panel-surface">
           <div className="panel-heading heart-panel-heading">
             <div>
               <span className="eyebrow">Corazón 3D en tiempo real</span>
-              <h2>{disease.name}</h2>
+              <h2>{comparisonActive ? `Referencia sana ↔ ${disease.name}` : disease.name}</h2>
             </div>
             <div className={`stability-pill ${simulation.stabilityTone}`}>
               {simulation.stabilityTone === "danger" && <AlertTriangle size={14} />}
@@ -855,29 +1089,72 @@ export default function CardioLab() {
             </div>
           </div>
 
-          <div className="heart-viewport">
-            <HeartScene
-              disease={disease}
+          {comparisonActive && (
+            <ComparisonDeltas
               simulation={simulation}
+              healthySimulation={healthySimulation}
+            />
+          )}
+
+          <div className="heart-viewport">
+            {comparisonActive && compactViewport && (
+              <div className="mobile-comparison-tabs" role="tablist" aria-label="Corazón mostrado">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mobileComparisonView === "healthy"}
+                  className={mobileComparisonView === "healthy" ? "active" : ""}
+                  onClick={() => setMobileComparisonView("healthy")}
+                >
+                  Referencia sana
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mobileComparisonView === "disease"}
+                  className={mobileComparisonView === "disease" ? "active" : ""}
+                  onClick={() => setMobileComparisonView("disease")}
+                >
+                  {disease.code} · Patología
+                </button>
+              </div>
+            )}
+
+            {comparisonActive && !compactViewport && (
+              <div className="comparison-heart-labels" aria-hidden="true">
+                <span><i />Referencia sin cardiopatía · mismas constantes</span>
+                <span style={{ "--label-color": disease.color } as CSSProperties}>
+                  <i />{disease.name}
+                </span>
+              </div>
+            )}
+
+            <HeartScene
+              disease={displayedDisease}
+              simulation={displayedSimulation}
               paused={paused}
               autoRotate={autoRotate}
               reducedMotion={reducedMotion}
-              motionTelemetry={motionTelemetry}
+              motionTelemetry={displayedTelemetry}
+              compareHealthy={comparisonActive && !compactViewport}
+              healthyDisease={healthyDisease}
+              healthySimulation={healthySimulation}
+              healthyMotionTelemetry={healthyMotionTelemetry}
             />
 
             <CardiacMotionGuide
-              telemetry={motionTelemetry}
-              disease={disease}
-              simulation={simulation}
+              telemetry={displayedTelemetry}
+              disease={displayedDisease}
+              simulation={displayedSimulation}
               paused={paused}
               reducedMotion={reducedMotion}
             />
 
             <div className="heart-view-label">
-              <span className="region-swatch" style={{ background: disease.color }} />
+              <span className="region-swatch" style={{ background: displayedDisease.color }} />
               <div>
-                <span>{disease.id === "healthy" ? "Referencia" : "Zona afectada"}</span>
-                <strong>{disease.regionLabel}</strong>
+                <span>{displayedDisease.id === "healthy" ? "Referencia" : "Zona afectada"}</span>
+                <strong>{displayedDisease.regionLabel}</strong>
               </div>
             </div>
 
@@ -896,17 +1173,6 @@ export default function CardioLab() {
                 <Rotate3D size={16} />
                 Giro 360°
               </button>
-              {disease.id !== "healthy" && (
-                <button
-                  type="button"
-                  className={compareHealthy ? "active" : ""}
-                  onClick={() => setCompareHealthy((current) => !current)}
-                  aria-pressed={compareHealthy}
-                >
-                  <Activity size={16} />
-                  Comparar ECG sano
-                </button>
-              )}
             </div>
           </div>
 
@@ -943,7 +1209,7 @@ export default function CardioLab() {
             </div>
 
             <span className="playback-note">
-              La gravedad se controla con un único ajuste en la explicación inferior.
+              El parámetro clínico se controla desde la barra superior del escenario.
             </span>
           </div>
         </article>
@@ -953,10 +1219,13 @@ export default function CardioLab() {
             disease={disease}
             simulation={simulation}
             paused={paused}
-            compareHealthy={compareHealthy}
+            compareHealthy={comparisonActive}
+            healthySimulation={healthySimulation}
             motionTelemetry={motionTelemetry}
             reducedMotion={reducedMotion}
             theme={theme}
+            lead={lead}
+            onLeadChange={setLead}
           />
 
           <div className="lesson-module">
@@ -1024,6 +1293,7 @@ export default function CardioLab() {
           </div>
         </aside>
       </section>
+      </div>
 
       <section className="disease-dock" aria-labelledby="disease-heading">
         <div className="section-title-line disease-title-line">
@@ -1060,31 +1330,6 @@ export default function CardioLab() {
               <p>{disease.summary}</p>
             </div>
           </div>
-
-          <label className="inspector-slider" hidden={disease.id === "healthy"}>
-            <span className="inspector-slider-head">
-              <span>Gravedad del escenario</span>
-              <strong>
-                {Math.round(diseaseSeverity)}% · {severityLabel(diseaseSeverity)}
-              </strong>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={diseaseSeverity}
-              onChange={(event) => {
-                setDiseaseSeverity(Number(event.target.value));
-                setClinicalTime(0);
-              }}
-            />
-            <span className="range-ends">
-              <small>Leve</small>
-              <small>{disease.specific.label}: {formatSpecific(disease, specificValue)}</small>
-              <small>Grave</small>
-            </span>
-          </label>
 
           <div className="inspector-result">
             <span>

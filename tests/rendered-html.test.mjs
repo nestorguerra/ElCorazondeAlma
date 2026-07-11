@@ -37,10 +37,11 @@ test("server-renders El Corazón de Alma and its educational safeguards", async 
 });
 
 test("ships the simulator without the disposable starter preview", async () => {
-  const [page, layout, cardioLab, simulation, packageJson] = await Promise.all([
+  const [page, layout, cardioLab, scenarioBar, simulation, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/CardioLab.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ScenarioBar.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/simulation.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
@@ -50,7 +51,8 @@ test("ships the simulator without the disposable starter preview", async () => {
   assert.match(layout, /Simulador educativo de cardiología/);
   assert.match(cardioLab, /DISEASES\.map/);
   assert.match(cardioLab, /Condiciones de partida esenciales/);
-  assert.match(cardioLab, /Gravedad del escenario/);
+  assert.match(scenarioBar, /Escenario clínico/);
+  assert.match(scenarioBar, /disease\.specific\.label/);
   assert.match(simulation, /Fibrilación auricular/);
   assert.match(simulation, /Pericarditis aguda/);
   assert.match(packageJson, /"three"/);

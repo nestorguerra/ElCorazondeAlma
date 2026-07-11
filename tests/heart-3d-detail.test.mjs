@@ -36,3 +36,13 @@ test("keeps 360-degree vascular detail and smooth tapered vessels", async () => 
   assert.match(source, /OrbitControls/);
   assert.match(source, /data-heart-quality="anatomical-high-detail"/);
 });
+
+test("compares healthy and diseased hearts in one synchronized WebGL canvas", async () => {
+  const source = await readFile(sceneUrl, "utf8");
+
+  assert.equal((source.match(/<Canvas\b/g) ?? []).length, 1);
+  assert.match(source, /REFERENCE_HEART_POSITION/);
+  assert.match(source, /DISEASE_HEART_POSITION/);
+  assert.match(source, /healthyMotionTelemetry/);
+  assert.match(source, /comparisonActive \? \(/);
+});

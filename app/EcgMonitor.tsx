@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { getAfibBeat } from "./afibModel";
 import { aorticStenosisEcgValue } from "./aorticStenosisModel";
 import { avBlockEcgValue } from "./avBlockModel";
@@ -19,9 +19,12 @@ type EcgMonitorProps = {
   simulation: DerivedSimulation;
   paused: boolean;
   compareHealthy: boolean;
+  healthySimulation?: DerivedSimulation;
   motionTelemetry: HeartMotionTelemetry;
   reducedMotion: boolean;
   theme: "dark" | "light";
+  lead: Lead;
+  onLeadChange: (lead: Lead) => void;
 };
 
 type EcgRuntime = {
@@ -29,6 +32,7 @@ type EcgRuntime = {
   simulation: DerivedSimulation;
   paused: boolean;
   compareHealthy: boolean;
+  healthySimulation?: DerivedSimulation;
   reducedMotion: boolean;
   lead: Lead;
   theme: "dark" | "light";
@@ -110,7 +114,7 @@ function ecgValue(
     rhythmIrregularity,
   } = simulation;
   const severity01 = healthy ? 0 : severity / 100;
-  const safeRate = healthy ? 72 : heartRate;
+  const safeRate = heartRate;
   const period = 60 / Math.max(28, safeRate);
   const local = time / period;
   const phase = ((local % 1) + 1) % 1;
@@ -195,19 +199,22 @@ export function EcgMonitor({
   simulation,
   paused,
   compareHealthy,
+  healthySimulation,
   motionTelemetry,
   reducedMotion,
   theme,
+  lead,
+  onLeadChange,
 }: EcgMonitorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const timeRef = useRef(0);
   const lastFrameRef = useRef<number | null>(null);
-  const [lead, setLead] = useState<Lead>("DII");
   const runtimeRef = useRef<EcgRuntime>({
     disease,
     simulation,
     paused,
     compareHealthy,
+    healthySimulation,
     reducedMotion,
     lead,
     theme,
@@ -219,11 +226,21 @@ export function EcgMonitor({
       simulation,
       paused,
       compareHealthy,
+      healthySimulation,
       reducedMotion,
       lead,
       theme,
     };
-  }, [compareHealthy, disease, lead, paused, reducedMotion, simulation, theme]);
+  }, [
+    compareHealthy,
+    disease,
+    healthySimulation,
+    lead,
+    paused,
+    reducedMotion,
+    simulation,
+    theme,
+  ]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -287,10 +304,13 @@ export function EcgMonitor({
       context.beginPath();
       for (let x = 0; x <= width; x += 1.5) {
         const sampleTime = timeRef.current - secondsVisible + (x / width) * secondsVisible;
+        const traceSimulation = healthy
+          ? runtime.healthySimulation ?? runtime.simulation
+          : runtime.simulation;
         const sample = ecgValue(
           sampleTime,
           runtime.disease.pattern,
-          runtime.simulation,
+          traceSimulation,
           runtime.lead,
           healthy,
         );
@@ -368,7 +388,7 @@ export function EcgMonitor({
               key={item}
               type="button"
               className={lead === item ? "active" : ""}
-              onClick={() => setLead(item)}
+              onClick={() => onLeadChange(item)}
               aria-pressed={lead === item}
             >
               {item}
@@ -387,6 +407,12 @@ export function EcgMonitor({
           <span>25 mm/s</span>
           <span>10 mm/mV</span>
         </div>
+        {compareHealthy && (
+          <div className="ecg-comparison-legend" aria-label="Leyenda de comparación">
+            <span className="pathology-trace">{disease.code} · patología</span>
+            <span className="healthy-trace">Referencia sin cardiopatía</span>
+          </div>
+        )}
         {paused && <div className="ecg-paused">TRAZO PAUSADO</div>}
       </div>
 

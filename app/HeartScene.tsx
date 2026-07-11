@@ -31,7 +31,20 @@ type HeartSceneProps = {
   autoRotate: boolean;
   reducedMotion: boolean;
   motionTelemetry: HeartMotionTelemetry;
+  compareHealthy?: boolean;
+  healthyDisease?: Disease;
+  healthySimulation?: DerivedSimulation;
+  healthyMotionTelemetry?: HeartMotionTelemetry;
 };
+
+type HeartModelProps = HeartSceneProps & {
+  modelPosition?: Point3;
+  modelScale?: number;
+};
+
+const SINGLE_HEART_POSITION: Point3 = [0, -0.08, 0];
+const REFERENCE_HEART_POSITION: Point3 = [-1.48, -0.08, 0];
+const DISEASE_HEART_POSITION: Point3 = [1.48, -0.08, 0];
 
 type VesselDefinition = {
   points: Point3[];
@@ -668,7 +681,9 @@ function HeartModel({
   paused,
   reducedMotion,
   motionTelemetry,
-}: HeartSceneProps) {
+  modelPosition = SINGLE_HEART_POSITION,
+  modelScale = 0.86,
+}: HeartModelProps) {
   const root = useRef<THREE.Group>(null);
   const ventricularAssembly = useRef<THREE.Group>(null);
   const atrialAssembly = useRef<THREE.Group>(null);
@@ -1527,8 +1542,8 @@ function HeartModel({
     <group
       ref={root}
       rotation={[0.02, -0.04, -0.035]}
-      position={[0, -0.08, 0]}
-      scale={0.86}
+      position={modelPosition}
+      scale={modelScale}
     >
       <group ref={ventricularAssembly}>
         <primitive
@@ -2053,6 +2068,13 @@ export function HeartScene(props: HeartSceneProps) {
     );
   }
 
+  const comparisonActive = Boolean(
+    props.compareHealthy &&
+      props.healthyDisease &&
+      props.healthySimulation &&
+      props.healthyMotionTelemetry,
+  );
+
   return (
     <Canvas
       className="heart-canvas"
@@ -2067,7 +2089,11 @@ export function HeartScene(props: HeartSceneProps) {
       }}
       data-heart-quality="anatomical-high-detail"
       data-heart-triangles="149992"
-      aria-label={`Modelo tridimensional educativo de alta definición con malla anatómica, texturas de tejido y red vascular anterior y posterior. Zona resaltada: ${props.disease.regionLabel}.`}
+      aria-label={
+        comparisonActive
+          ? `Comparación tridimensional sincronizada entre referencia sin cardiopatía y ${props.disease.name}. Zona afectada: ${props.disease.regionLabel}.`
+          : `Modelo tridimensional educativo de alta definición con malla anatómica, texturas de tejido y red vascular anterior y posterior. Zona resaltada: ${props.disease.regionLabel}.`
+      }
     >
       <ambientLight intensity={0.72} />
       <hemisphereLight
@@ -2088,12 +2114,30 @@ export function HeartScene(props: HeartSceneProps) {
       />
       <pointLight position={[1, -1, 4]} intensity={0.72} color="#ff8e86" />
       <Suspense fallback={<CanvasLoadingHeart />}>
-        <HeartModel {...props} />
+        {comparisonActive ? (
+          <>
+            <HeartModel
+              {...props}
+              disease={props.healthyDisease!}
+              simulation={props.healthySimulation!}
+              motionTelemetry={props.healthyMotionTelemetry!}
+              modelPosition={REFERENCE_HEART_POSITION}
+              modelScale={0.62}
+            />
+            <HeartModel
+              {...props}
+              modelPosition={DISEASE_HEART_POSITION}
+              modelScale={0.62}
+            />
+          </>
+        ) : (
+          <HeartModel {...props} />
+        )}
       </Suspense>
       <ContactShadows
         position={[0, -2.42, 0]}
         opacity={0.38}
-        scale={5.8}
+        scale={comparisonActive ? 7.4 : 5.8}
         blur={2.7}
         far={5}
         color="#02070d"
@@ -2102,8 +2146,8 @@ export function HeartScene(props: HeartSceneProps) {
         enablePan={false}
         enableDamping
         dampingFactor={0.055}
-        minDistance={4.25}
-        maxDistance={9}
+        minDistance={comparisonActive ? 5.4 : 4.25}
+        maxDistance={comparisonActive ? 10.5 : 9}
         minPolarAngle={0.28}
         maxPolarAngle={Math.PI - 0.28}
         autoRotate={props.autoRotate && !props.paused && !props.reducedMotion}

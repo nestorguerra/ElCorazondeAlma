@@ -35,24 +35,28 @@ test("reduces the visible clinical inputs to four essential conditions", async (
   assert.doesNotMatch(cardioLab, /label="Viscosidad relativa"/);
 });
 
-test("uses one disease-severity control and keeps clinical detail as read-only output", async () => {
-  const cardioLab = await readFile(
-    new URL("../app/CardioLab.tsx", import.meta.url),
-    "utf8",
-  );
-  const sliders = cardioLab.match(/className="inspector-slider"/g) ?? [];
+test("uses the disease-specific clinical parameter instead of a generic severity slider", async () => {
+  const [cardioLab, scenarioBar, scenario] = await Promise.all([
+    readFile(new URL("../app/CardioLab.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ScenarioBar.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/scenario.ts", import.meta.url), "utf8"),
+  ]);
 
-  assert.equal(sliders.length, 1);
-  assert.match(cardioLab, /severityToSpecific/);
-  assert.match(cardioLab, /Gravedad del escenario/);
-  assert.match(cardioLab, /disease\.specific\.label/);
+  assert.doesNotMatch(cardioLab, /className="inspector-slider"/);
+  assert.match(cardioLab, /specificToSeverity/);
+  assert.match(scenarioBar, /disease\.specific\.label/);
+  assert.match(scenarioBar, /config\.kind === "discrete"/);
+  assert.match(scenario, /Índice didáctico de variabilidad/);
+  assert.match(scenario, /Expresión didáctica del patrón ECG/);
 });
 
 test("ships the simplified professional header, themes and large lower explanation", async () => {
-  const [cardioLab, styles, ecgMonitor] = await Promise.all([
+  const [cardioLab, styles, ecgMonitor, scenarioBar, guidedLesson] = await Promise.all([
     readFile(new URL("../app/CardioLab.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/EcgMonitor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ScenarioBar.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/GuidedLesson.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(cardioLab, /<h1>El Corazón de Alma<\/h1>/);
@@ -67,4 +71,11 @@ test("ships the simplified professional header, themes and large lower explanati
   assert.match(styles, /\.right-rail \.lesson-module\s*{\s*display: none/);
   assert.match(styles, /\.condition-explanation h3[\s\S]{0,120}font-size: clamp\(22px/);
   assert.match(ecgMonitor, /theme: "dark" \| "light"/);
+  assert.match(ecgMonitor, /healthySimulation/);
+  assert.match(ecgMonitor, /ecg-comparison-legend/);
+  assert.match(scenarioBar, /Clase guiada/);
+  assert.match(scenarioBar, /Comparar sano/);
+  assert.match(guidedLesson, /Observa/);
+  assert.match(guidedLesson, /Modifica/);
+  assert.match(guidedLesson, /Interpreta/);
 });
