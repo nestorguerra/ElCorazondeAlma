@@ -16,6 +16,12 @@ import {
   computeCardiacMotion,
   type HeartMotionTelemetry,
 } from "./heartMotion";
+import {
+  ANTEROLATERAL_REGION_MODEL,
+  ANTEROLATERAL_REGION_SCENE,
+  HEART_MODEL_SCALE,
+  type Point3,
+} from "./heartRegion";
 import type { Disease, DerivedSimulation } from "./simulation";
 
 type HeartSceneProps = {
@@ -26,8 +32,6 @@ type HeartSceneProps = {
   reducedMotion: boolean;
   motionTelemetry: HeartMotionTelemetry;
 };
-
-type Point3 = [number, number, number];
 
 type VesselDefinition = {
   points: Point3[];
@@ -75,7 +79,9 @@ function createHeartMotionUniforms(): HeartMotionUniforms {
     uDyssynchrony: { value: 0 },
     uRegionalDysfunction: { value: 0 },
     uRegionalDelay: { value: 0 },
-    uRegionalCenter: { value: new THREE.Vector3(-0.095, -0.11, -0.187) },
+    uRegionalCenter: {
+      value: new THREE.Vector3(...ANTEROLATERAL_REGION_MODEL),
+    },
     uRegionalRadius: { value: 0.23 },
   };
 }
@@ -1152,7 +1158,7 @@ function HeartModel({
       <group ref={ventricularAssembly}>
         <primitive
           object={anatomicalAsset.model}
-          scale={[4.5, 4.5, 4.5]}
+          scale={[HEART_MODEL_SCALE, HEART_MODEL_SCALE, HEART_MODEL_SCALE]}
           rotation={[0, Math.PI, 0]}
         />
 
@@ -1293,7 +1299,7 @@ function HeartModel({
           <group>
             <mesh
               ref={lesionPatch}
-              position={[0.43, -0.5, 0.84]}
+              position={ANTEROLATERAL_REGION_SCENE}
               rotation={[-0.12, 0.02, -0.04]}
               scale={[0.52, 0.76, 0.1]}
             >

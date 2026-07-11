@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { computeCardiacMotion } from "../app/heartMotion.ts";
+import {
+  computeCardiacMotion,
+  ventricularActivationAtPhase,
+} from "../app/heartMotion.ts";
+import {
+  ANTEROLATERAL_REGION_MODEL,
+  ANTEROLATERAL_REGION_SCENE,
+  modelPointToHeartScene,
+} from "../app/heartRegion.ts";
 import { ischemiaComplex } from "../app/ischemiaModel.ts";
 import {
   DEFAULT_VITALS,
@@ -84,6 +92,24 @@ test("progresses from preserved motion to regional delay and hypokinesis", () =>
   assert.ok(high.regionalDysfunction > 0.6);
   assert.ok(high.regionalDelay > 0.075);
   assert.ok(high.regionalDysfunction < 0.7);
+
+  const earlyGlobal = ventricularActivationAtPhase(0.08);
+  const earlyRegional = ventricularActivationAtPhase(0.08, high.regionalDelay);
+  const lateGlobal = ventricularActivationAtPhase(0.5);
+  const lateRegional = ventricularActivationAtPhase(0.5, high.regionalDelay);
+  assert.ok(earlyRegional < earlyGlobal, "ischemic contraction should start later");
+  assert.ok(
+    lateRegional > lateGlobal,
+    "regional contraction should persist after global relaxation begins",
+  );
+});
+
+test("maps the shader territory to the visible anterolateral lesion patch", () => {
+  const mapped = modelPointToHeartScene(ANTEROLATERAL_REGION_MODEL);
+  assert.deepEqual(mapped, ANTEROLATERAL_REGION_SCENE);
+  assert.ok(Math.abs(mapped[0] - 0.4275) < 1e-9);
+  assert.ok(Math.abs(mapped[1] + 0.495) < 1e-9);
+  assert.ok(Math.abs(mapped[2] - 0.8415) < 1e-9);
 });
 
 test("wires ischemia-specific perfusion and delayed regional deformation", async () => {
@@ -96,6 +122,7 @@ test("wires ischemia-specific perfusion and delayed regional deformation", async
   assert.doesNotMatch(ecg, /pattern === "ischemia"\) \{\s+const regional/);
   assert.match(heart, /uIschemiaMode/);
   assert.match(heart, /uRegionalDelay/);
+  assert.match(heart, /ANTEROLATERAL_REGION_SCENE/);
   assert.match(heart, /coronaryPerfusion/);
   assert.match(heart, /coronaryFlowFraction/);
 });
