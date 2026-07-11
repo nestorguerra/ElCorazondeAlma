@@ -30,7 +30,7 @@ test("server-renders El Corazón de Alma and its educational safeguards", async 
 
   const html = await response.text();
   assert.match(html, /<title>El Corazón de Alma/);
-  assert.match(html, /Simulación educativa/);
+  assert.match(html, /Corazón sano/);
   assert.match(html, /Fibrilación auricular/);
   assert.match(html, /ECG sintético/);
   assert.match(html, /no diagnostica/i);
@@ -49,7 +49,8 @@ test("ships the simulator without the disposable starter preview", async () => {
   assert.match(layout, /lang="es"/);
   assert.match(layout, /Simulador educativo de cardiología/);
   assert.match(cardioLab, /DISEASES\.map/);
-  assert.match(cardioLab, /Modelo didáctico simplificado/);
+  assert.match(cardioLab, /Condiciones de partida esenciales/);
+  assert.match(cardioLab, /Gravedad del escenario/);
   assert.match(simulation, /Fibrilación auricular/);
   assert.match(simulation, /Pericarditis aguda/);
   assert.match(packageJson, /"three"/);

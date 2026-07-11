@@ -42,6 +42,7 @@ const toAvBlockStage = (value: number) =>
   Math.min(4, Math.max(1, Math.round(value))) as AvBlockStage;
 
 export type DiseaseId =
+  | "healthy"
   | "afib"
   | "vt"
   | "av-block"
@@ -54,6 +55,7 @@ export type DiseaseId =
   | "hcm";
 
 export type EcgPattern =
+  | "healthy"
   | "afib"
   | "vt"
   | "av-block"
@@ -66,6 +68,7 @@ export type EcgPattern =
   | "hcm";
 
 export type RegionId =
+  | "none"
   | "atria"
   | "ventricles"
   | "av-node"
@@ -156,6 +159,40 @@ export const DEFAULT_VITALS: Vitals = {
 };
 
 export const DISEASES: Disease[] = [
+  {
+    id: "healthy",
+    code: "SANO",
+    name: "Corazón sano",
+    family: "Referencia",
+    color: "#52e6bc",
+    region: "none",
+    regionLabel: "cuatro cámaras y válvulas coordinadas",
+    pattern: "healthy",
+    summary:
+      "Ritmo sinusal, conducción normal y contracción coordinada con función de bomba conservada.",
+    heartLesson:
+      "Las aurículas completan el llenado y después ambos ventrículos se contraen de forma coordinada. Las válvulas dirigen el flujo sin obstrucción ni regurgitación.",
+    ecgLesson:
+      "La onda P precede a cada QRS estrecho, los intervalos son regulares y la repolarización mantiene una morfología fisiológica.",
+    causalLesson:
+      "Es la referencia para comparar cómo cada enfermedad altera el ritmo, la conducción, el músculo, las válvulas o el flujo coronario.",
+    caveat:
+      "Es una referencia educativa, no una certificación de salud ni una interpretación de datos reales de una persona.",
+    rhythmLabel: "Sinusal regular",
+    qrsLabel: "Estrecho",
+    stLabel: "Repolarización fisiológica",
+    mechanicalLoss: 0,
+    progressionRate: 0,
+    timeUnit: "min",
+    specific: {
+      label: "Referencia sana",
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: 0,
+      unit: "%",
+    },
+  },
   {
     id: "afib",
     code: "FA",
@@ -671,7 +708,9 @@ export function deriveSimulation(
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
   const startingSeverity =
-    disease.id === "afib"
+    disease.id === "healthy"
+      ? 0
+      : disease.id === "afib"
       ? baseSeverity
       : disease.id === "vt"
         ? clamp(baseSeverity + (specificLoad - 0.45) * 18, 0, 100)
@@ -722,6 +761,7 @@ export function deriveSimulation(
                       )
           : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression =
+    disease.id === "healthy" ||
     disease.id === "infarction" ||
     disease.id === "heart-failure" ||
     disease.id === "aortic-stenosis" ||
@@ -762,6 +802,9 @@ export function deriveSimulation(
   heartRate = clamp(Math.round(heartRate), 28, 220);
 
   let contractility = clamp(1 - disease.mechanicalLoss * severity01, 0.18, 1);
+  if (disease.id === "healthy") {
+    contractility = 1;
+  }
   if (disease.id === "afib") {
     // AF primarily removes atrial contribution and varies preload beat to beat;
     // it does not inherently weaken ventricular myocardial contractility.
@@ -871,6 +914,9 @@ export function deriveSimulation(
     16,
     76,
   );
+  if (disease.id === "healthy") {
+    ejectionFraction = clamp(64 - pressureLoad * 2, 60, 66);
+  }
   if (disease.id === "afib") {
     ejectionFraction = clamp(64 - pressureLoad * 3, 56, 68);
   }

@@ -4,7 +4,7 @@ import "./globals.css";
 
 const title = "El Corazón de Alma · Simulador educativo de cardiología";
 const description =
-  "Explora un corazón 3D, modifica constantes fisiológicas y aprende a reconocer diez escenarios cardiovasculares y sus patrones ECG.";
+  "Compara un corazón sano con diez escenarios cardiovasculares mediante anatomía 3D, fisiología y ECG sincronizados.";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

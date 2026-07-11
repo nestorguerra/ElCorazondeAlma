@@ -4,23 +4,19 @@ import {
   Activity,
   AlertTriangle,
   BookOpen,
-  CircleGauge,
   Clock3,
-  Droplets,
   Eye,
   EyeOff,
   Gauge,
   HeartPulse,
-  Info,
+  Moon,
   Pause,
   Play,
   Rotate3D,
   RotateCcw,
-  Settings2,
   ShieldAlert,
+  Sun,
   Thermometer,
-  TimerReset,
-  Waves,
   Wind,
   Zap,
 } from "lucide-react";
@@ -66,6 +62,7 @@ type VitalControlProps = {
   decimals?: number;
 };
 
+type Theme = "dark" | "light";
 type LessonTab = "heart" | "cause" | "caution";
 
 const SOURCES = [
@@ -235,6 +232,66 @@ function VitalControl({
   );
 }
 
+function BloodPressureControl({
+  systolic,
+  diastolic,
+  currentSystolic,
+  currentDiastolic,
+  map,
+  onSystolicChange,
+  onDiastolicChange,
+}: {
+  systolic: number;
+  diastolic: number;
+  currentSystolic: number;
+  currentDiastolic: number;
+  map: number;
+  onSystolicChange: (value: number) => void;
+  onDiastolicChange: (value: number) => void;
+}) {
+  return (
+    <div className="vital-control blood-pressure-control">
+      <span className="vital-control-top">
+        <span className="vital-icon" aria-hidden="true">
+          <Gauge size={17} />
+        </span>
+        <span className="vital-label">Presión arterial</span>
+      </span>
+      <span className="vital-reading">
+        <strong>{currentSystolic}/{currentDiastolic}</strong>
+        <span>mmHg</span>
+      </span>
+      <div className="blood-pressure-ranges">
+        <label>
+          <span>Sistólica</span>
+          <input
+            type="range"
+            min={80}
+            max={210}
+            step={1}
+            value={systolic}
+            onChange={(event) => onSystolicChange(Number(event.target.value))}
+            aria-label={`Presión sistólica: ${systolic} mmHg`}
+          />
+        </label>
+        <label>
+          <span>Diastólica</span>
+          <input
+            type="range"
+            min={45}
+            max={125}
+            step={1}
+            value={diastolic}
+            onChange={(event) => onDiastolicChange(Number(event.target.value))}
+            aria-label={`Presión diastólica: ${diastolic} mmHg`}
+          />
+        </label>
+      </div>
+      <span className="vital-hint">PAM calculada: {map} mmHg</span>
+    </div>
+  );
+}
+
 function DiseaseCard({
   disease,
   selected,
@@ -255,10 +312,9 @@ function DiseaseCard({
     >
       <span className="disease-card-top">
         <span className="disease-code">{disease.code}</span>
-        <span className="disease-family">{disease.family}</span>
+        {disease.id === "healthy" && <span className="healthy-dot" />}
       </span>
       <strong>{disease.name}</strong>
-      <span className="disease-card-region">{disease.regionLabel}</span>
     </button>
   );
 }
@@ -269,7 +325,78 @@ function severityLabel(value: number) {
   return "severa";
 }
 
+function severityToSpecific(disease: Disease, severity: number) {
+  const visualFraction = Math.min(1, Math.max(0, severity / 100));
+  const specificFraction = disease.specific.inverse
+    ? 1 - visualFraction
+    : visualFraction;
+  const raw =
+    disease.specific.min +
+    (disease.specific.max - disease.specific.min) * specificFraction;
+  const stepped =
+    Math.round((raw - disease.specific.min) / disease.specific.step) *
+      disease.specific.step +
+    disease.specific.min;
+  return Math.min(disease.specific.max, Math.max(disease.specific.min, stepped));
+}
+
+function defaultSeverityForDisease(disease: Disease) {
+  if (disease.id === "healthy") return 0;
+  const fraction =
+    (disease.specific.defaultValue - disease.specific.min) /
+    (disease.specific.max - disease.specific.min);
+  return Math.round((disease.specific.inverse ? 1 - fraction : fraction) * 100);
+}
+
+function clinicalStage(disease: Disease, simulation: DerivedSimulation) {
+  if (disease.id === "healthy") return "Referencia fisiológica";
+  if (disease.id === "infarction") return simulation.infarction.stageLabel;
+  if (disease.id === "heart-failure") return simulation.heartFailure.stageLabel;
+  if (disease.id === "aortic-stenosis") return simulation.aorticStenosis.stageLabel;
+  if (disease.id === "mitral-regurgitation") {
+    return simulation.mitralRegurgitation.stageLabel;
+  }
+  if (disease.id === "pericarditis") return simulation.pericarditis.stageLabel;
+  if (disease.id === "hcm") return simulation.hcm.stageLabel;
+  return `${Math.round(simulation.severity)}% · ${severityLabel(simulation.severity)}`;
+}
+
+function clinicalDetail(disease: Disease, simulation: DerivedSimulation) {
+  if (disease.id === "healthy") {
+    return "Ritmo sinusal · QRS estrecho · FE conservada · contracción coordinada";
+  }
+  if (disease.id === "afib") {
+    return `R–R variable · respuesta ventricular ${simulation.heartRate} lpm`;
+  }
+  if (disease.id === "vt") {
+    return `TV monomórfica ${simulation.heartRate} lpm · QRS ancho · disociación AV`;
+  }
+  if (disease.id === "av-block") {
+    return `Grado ${simulation.avBlockStage} · frecuencia ventricular ${simulation.heartRate} lpm`;
+  }
+  if (disease.id === "ischemia") {
+    return `Flujo coronario ${Math.round(simulation.coronaryFlowFraction * 100)}% · desequilibrio aporte–demanda ${Math.round(simulation.supplyDemandImbalance * 100)}%`;
+  }
+  if (disease.id === "infarction") {
+    return `Lesión ${Math.round(simulation.infarction.myocardialInjuryFraction * 100)}% · necrosis ${Math.round(simulation.infarction.necrosisFraction * 100)}%`;
+  }
+  if (disease.id === "heart-failure") {
+    return `FE ${Math.round(simulation.heartFailure.ejectionFraction)}% · VTD ${Math.round(simulation.heartFailure.endDiastolicVolume)} mL · VTS ${Math.round(simulation.heartFailure.endSystolicVolume)} mL`;
+  }
+  if (disease.id === "aortic-stenosis") {
+    return `AVA ${simulation.aorticStenosis.valveArea.toFixed(1)} cm² · Vmáx ${simulation.aorticStenosis.peakVelocity.toFixed(1)} m/s · gradiente ${Math.round(simulation.aorticStenosis.meanGradient)} mmHg`;
+  }
+  if (disease.id === "mitral-regurgitation") {
+    return `FR ${Math.round(simulation.mitralRegurgitation.regurgitantFraction * 100)}% · volumen regurgitante ${Math.round(simulation.mitralRegurgitation.regurgitantVolume)} mL · flujo útil ${Math.round(simulation.mitralRegurgitation.forwardStrokeVolume)} mL`;
+  }
+  if (disease.id === "pericarditis") {
+    return `ST ${Math.round(simulation.pericarditis.stElevation * 100)}% · PR ${Math.round(simulation.pericarditis.prDepression * 100)}% · inversión T ${Math.round(simulation.pericarditis.tInversion * 100)}%`;
+  }
+  return `Septo ${simulation.hcm.septalThickness.toFixed(0)} mm · gradiente TSVI ${Math.round(simulation.hcm.lvotGradient)} mmHg · FE ${Math.round(simulation.hcm.ejectionFraction)}%`;
+}
+
 const MOTION_FOCUS: Record<DiseaseId, string> = {
+  healthy: "Aurículas y ventrículos coordinados · llenado y eyección fisiológicos",
   afib: "Sin contracción auricular útil · fuerza ventricular variable",
   vt: "Activación ventricular retardada · aurículas independientes",
   "av-block": "Aurículas regulares · conducción AV según el grado",
@@ -478,20 +605,22 @@ function formatClinicalTime(value: number, unit: Disease["timeUnit"]) {
 
 export default function CardioLab() {
   const [vitals, setVitals] = useState<Vitals>(DEFAULT_VITALS);
-  const [diseaseId, setDiseaseId] = useState<DiseaseId>("afib");
+  const [diseaseId, setDiseaseId] = useState<DiseaseId>("healthy");
   const disease = useMemo(() => getDisease(diseaseId), [diseaseId]);
-  const [baseSeverity, setBaseSeverity] = useState(44);
-  const [specificValue, setSpecificValue] = useState(
-    getDisease("afib").specific.defaultValue,
+  const [diseaseSeverity, setDiseaseSeverity] = useState(0);
+  const baseSeverity = diseaseSeverity;
+  const specificValue = useMemo(
+    () => severityToSpecific(disease, diseaseSeverity),
+    [disease, diseaseSeverity],
   );
   const [clinicalTime, setClinicalTime] = useState(0);
-  const [timeSpeed, setTimeSpeed] = useState(1);
   const [paused, setPaused] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
   const [compareHealthy, setCompareHealthy] = useState(false);
   const [lessonTab, setLessonTab] = useState<LessonTab>("heart");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [theme, setTheme] = useState<Theme>("dark");
   const motionTelemetry = useMemo(() => createHeartMotionTelemetry(), []);
 
   useEffect(() => {
@@ -512,12 +641,17 @@ export default function CardioLab() {
   }, []);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("corazon-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
     if (paused) return;
     const timer = window.setInterval(() => {
-      setClinicalTime((current) => Math.min(100, current + 0.035 * timeSpeed));
-    }, 100);
+      setClinicalTime((current) => Math.min(100, current + 0.0875));
+    }, 250);
     return () => window.clearInterval(timer);
-  }, [paused, timeSpeed]);
+  }, [paused]);
 
   useEffect(() => {
     if (!sourcesOpen) return;
@@ -550,20 +684,17 @@ export default function CardioLab() {
   const selectDisease = (nextId: DiseaseId) => {
     const next = getDisease(nextId);
     setDiseaseId(nextId);
-    setBaseSeverity(44);
-    setSpecificValue(next.specific.defaultValue);
+    setDiseaseSeverity(defaultSeverityForDisease(next));
     setClinicalTime(0);
+    setCompareHealthy(false);
     setLessonTab("heart");
   };
 
   const resetAll = () => {
-    const initialDisease = getDisease("afib");
     setVitals(DEFAULT_VITALS);
-    setDiseaseId("afib");
-    setBaseSeverity(44);
-    setSpecificValue(initialDisease.specific.defaultValue);
+    setDiseaseId("healthy");
+    setDiseaseSeverity(0);
     setClinicalTime(0);
-    setTimeSpeed(1);
     setPaused(false);
     setAutoRotate(false);
     setCompareHealthy(false);
@@ -580,27 +711,10 @@ export default function CardioLab() {
   const severityText = severityLabel(simulation.severity);
 
   return (
-    <main className="cardio-app">
+    <main className="cardio-app" data-theme={theme}>
       <header className="app-header">
         <div className="brand-block">
-          <span className="brand-mark" aria-hidden="true">
-            <HeartPulse size={24} />
-          </span>
-          <div>
-            <div className="brand-title-row">
-              <h1>El Corazón de Alma</h1>
-              <span className="education-badge">Simulación educativa</span>
-            </div>
-            <p>Aprende viendo cómo cambian electricidad, músculo y flujo.</p>
-          </div>
-        </div>
-
-        <div className="live-state" aria-live="polite">
-          <span className={`live-dot ${paused ? "paused" : ""}`} />
-          <div>
-            <span>{paused ? "Simulación pausada" : "Modelo en tiempo real"}</span>
-            <strong>{disease.name}</strong>
-          </div>
+          <h1>El Corazón de Alma</h1>
         </div>
 
         <div className="header-actions">
@@ -621,43 +735,33 @@ export default function CardioLab() {
           >
             {reducedMotion ? <EyeOff size={18} /> : <Eye size={18} />}
           </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
+            aria-label={theme === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
+            title={theme === "dark" ? "Modo claro" : "Modo oscuro"}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
           <button type="button" className="icon-button" onClick={resetAll} aria-label="Restablecer simulación" title="Restablecer">
             <RotateCcw size={18} />
           </button>
         </div>
       </header>
 
-      <div className="safety-banner">
-        <Info size={15} />
-        <span>
-          Modelo didáctico simplificado: ayuda a entender relaciones, pero no diagnostica ni sustituye ECG, ecocardiografía, analítica o valoración médica.
-        </span>
-      </div>
-
       <section className="patient-section" aria-labelledby="patient-heading">
         <div className="section-title-line">
           <div>
-            <span className="eyebrow">01 · Paciente simulado</span>
-            <h2 id="patient-heading">Modifica las condiciones de partida</h2>
-          </div>
-          <div className="section-note">
-            <Settings2 size={15} />
-            <span>Los valores “actuales” se calculan con la patología activa.</span>
+            <span className="eyebrow">Constantes clínicas</span>
+            <h2 id="patient-heading">Condiciones de partida esenciales</h2>
           </div>
         </div>
 
         <div className="vital-grid">
           <VitalControl
             icon={<HeartPulse size={17} />}
-            label={
-              disease.id === "afib"
-                ? "Respuesta ventricular media"
-                : disease.id === "vt"
-                  ? "Frecuencia auricular"
-                  : disease.id === "av-block"
-                    ? "Frecuencia auricular"
-                  : "FC basal"
-            }
+            label="Frecuencia basal"
             value={vitals.heartRate}
             min={40}
             max={160}
@@ -670,39 +774,18 @@ export default function CardioLab() {
                 : `Actual: ${simulation.heartRate} lpm`
             }
           />
-          <VitalControl
-            icon={<Thermometer size={17} />}
-            label="Temperatura"
-            value={vitals.temperature}
-            min={35}
-            max={41}
-            step={0.1}
-            decimals={1}
-            unit="°C"
-            onChange={(value) => setVital("temperature", value)}
-            hint={vitals.temperature >= 38 ? "Fiebre: aumenta demanda y FC" : "Tendencia fisiológica suave"}
-          />
-          <VitalControl
-            icon={<Gauge size={17} />}
-            label="PA sistólica"
-            value={vitals.systolic}
-            min={80}
-            max={210}
-            step={1}
-            unit="mmHg"
-            onChange={(value) => setVital("systolic", Math.max(value, vitals.diastolic + 15))}
-            hint={`Actual: ${simulation.currentSystolic} mmHg`}
-          />
-          <VitalControl
-            icon={<CircleGauge size={17} />}
-            label="PA diastólica"
-            value={vitals.diastolic}
-            min={45}
-            max={125}
-            step={1}
-            unit="mmHg"
-            onChange={(value) => setVital("diastolic", Math.min(value, vitals.systolic - 15))}
-            hint={`Actual: ${simulation.currentDiastolic} · PAM ${simulation.map}`}
+          <BloodPressureControl
+            systolic={vitals.systolic}
+            diastolic={vitals.diastolic}
+            currentSystolic={simulation.currentSystolic}
+            currentDiastolic={simulation.currentDiastolic}
+            map={simulation.map}
+            onSystolicChange={(value) =>
+              setVital("systolic", Math.max(value, vitals.diastolic + 15))
+            }
+            onDiastolicChange={(value) =>
+              setVital("diastolic", Math.min(value, vitals.systolic - 15))
+            }
           />
           <VitalControl
             icon={<Wind size={17} />}
@@ -716,29 +799,16 @@ export default function CardioLab() {
             hint="Aporte sistémico de oxígeno"
           />
           <VitalControl
-            icon={<Droplets size={17} />}
-            label="LDL"
-            value={vitals.ldl}
-            min={55}
-            max={260}
-            step={1}
-            unit="mg/dL"
-            onChange={(value) => setVital("ldl", value)}
-            hint="No cambia el latido al instante"
-            tag="crónico"
-          />
-          <VitalControl
-            icon={<Waves size={17} />}
-            label="Viscosidad relativa"
-            value={vitals.viscosity}
-            min={0.8}
-            max={1.7}
-            step={0.05}
-            decimals={2}
-            unit="×"
-            onChange={(value) => setVital("viscosity", value)}
-            hint="Índice conceptual, no medición clínica"
-            tag="avanzado"
+            icon={<Thermometer size={17} />}
+            label="Temperatura"
+            value={vitals.temperature}
+            min={35}
+            max={41}
+            step={0.1}
+            decimals={1}
+            unit="°C"
+            onChange={(value) => setVital("temperature", value)}
+            hint={vitals.temperature >= 38 ? "Fiebre: aumenta demanda y FC" : "Situación basal afebril"}
           />
         </div>
       </section>
@@ -747,7 +817,7 @@ export default function CardioLab() {
         <article className="heart-panel panel-surface">
           <div className="panel-heading heart-panel-heading">
             <div>
-              <span className="eyebrow">02 · Corazón 3D vivo</span>
+              <span className="eyebrow">Corazón 3D en tiempo real</span>
               <h2>{disease.name}</h2>
             </div>
             <div className={`stability-pill ${simulation.stabilityTone}`}>
@@ -806,7 +876,7 @@ export default function CardioLab() {
             <div className="heart-view-label">
               <span className="region-swatch" style={{ background: disease.color }} />
               <div>
-                <span>Zona afectada</span>
+                <span>{disease.id === "healthy" ? "Referencia" : "Zona afectada"}</span>
                 <strong>{disease.regionLabel}</strong>
               </div>
             </div>
@@ -814,11 +884,6 @@ export default function CardioLab() {
             <div className="heart-navigation-hint">
               <Rotate3D size={15} />
               <span>Arrastra para girar · rueda para acercar</span>
-            </div>
-
-            <div className="heart-detail-badge" aria-label="Malla anatómica de alta definición">
-              <span />
-              Malla anatómica · 150k triángulos
             </div>
 
             <div className="heart-viewport-actions">
@@ -831,15 +896,17 @@ export default function CardioLab() {
                 <Rotate3D size={16} />
                 Giro 360°
               </button>
-              <button
-                type="button"
-                className={compareHealthy ? "active" : ""}
-                onClick={() => setCompareHealthy((current) => !current)}
-                aria-pressed={compareHealthy}
-              >
-                <Activity size={16} />
-                ECG sano
-              </button>
+              {disease.id !== "healthy" && (
+                <button
+                  type="button"
+                  className={compareHealthy ? "active" : ""}
+                  onClick={() => setCompareHealthy((current) => !current)}
+                  aria-pressed={compareHealthy}
+                >
+                  <Activity size={16} />
+                  Comparar ECG sano
+                </button>
+              )}
             </div>
           </div>
 
@@ -857,37 +924,27 @@ export default function CardioLab() {
             <div className="timeline-status">
               <div className="timeline-label-row">
                 <span>
-                  <Clock3 size={14} /> Tiempo clínico
+                  <Clock3 size={14} /> {disease.id === "healthy" ? "Referencia continua" : "Evolución clínica"}
                 </span>
-                <strong>{formatClinicalTime(clinicalTime, disease.timeUnit)}</strong>
+                <strong>
+                  {disease.id === "healthy"
+                    ? "ritmo estable"
+                    : formatClinicalTime(clinicalTime, disease.timeUnit)}
+                </strong>
               </div>
               <div className="timeline-track" aria-hidden="true">
                 <span
                   style={{
-                    width: `${simulation.severity}%`,
+                    width: `${disease.id === "healthy" ? 100 : simulation.severity}%`,
                     background: disease.color,
                   }}
                 />
               </div>
             </div>
 
-            <div className="speed-control" aria-label="Velocidad de evolución clínica">
-              <span>Evolución</span>
-              {[1, 5, 20].map((speed) => (
-                <button
-                  type="button"
-                  key={speed}
-                  className={timeSpeed === speed ? "active" : ""}
-                  onClick={() => setTimeSpeed(speed)}
-                  aria-pressed={timeSpeed === speed}
-                >
-                  ×{speed}
-                </button>
-              ))}
-              <button type="button" onClick={() => setClinicalTime(0)} aria-label="Reiniciar tiempo clínico" title="Reiniciar tiempo">
-                <TimerReset size={16} />
-              </button>
-            </div>
+            <span className="playback-note">
+              La gravedad se controla con un único ajuste en la explicación inferior.
+            </span>
           </div>
         </article>
 
@@ -899,6 +956,7 @@ export default function CardioLab() {
             compareHealthy={compareHealthy}
             motionTelemetry={motionTelemetry}
             reducedMotion={reducedMotion}
+            theme={theme}
           />
 
           <div className="lesson-module">
@@ -970,17 +1028,17 @@ export default function CardioLab() {
       <section className="disease-dock" aria-labelledby="disease-heading">
         <div className="section-title-line disease-title-line">
           <div>
-            <span className="eyebrow">03 · Biblioteca de escenarios</span>
-            <h2 id="disease-heading">Elige qué quieres aprender</h2>
+            <span className="eyebrow">Condición cardíaca</span>
+            <h2 id="disease-heading">Compara el corazón sano con cada enfermedad</h2>
           </div>
           <div className="dock-status" aria-live="polite">
             <span className="region-swatch" style={{ background: disease.color }} />
             <span>{disease.name}</span>
-            <strong>{severityText}</strong>
+            <strong>{disease.id === "healthy" ? "referencia" : severityText}</strong>
           </div>
         </div>
 
-        <div className="disease-grid" role="radiogroup" aria-label="Patologías cardiovasculares">
+        <div className="disease-grid" role="radiogroup" aria-label="Condiciones cardíacas">
           {DISEASES.map((item) => (
             <DiseaseCard
               key={item.id}
@@ -991,7 +1049,10 @@ export default function CardioLab() {
           ))}
         </div>
 
-        <div className="disease-inspector" style={{ "--disease-color": disease.color } as CSSProperties}>
+        <div
+          className={`disease-inspector ${disease.id === "healthy" ? "healthy" : ""}`}
+          style={{ "--disease-color": disease.color } as CSSProperties}
+        >
           <div className="disease-summary-block">
             <span className="disease-code large">{disease.code}</span>
             <div>
@@ -1000,64 +1061,36 @@ export default function CardioLab() {
             </div>
           </div>
 
-          <label className="inspector-slider">
+          <label className="inspector-slider" hidden={disease.id === "healthy"}>
             <span className="inspector-slider-head">
-              <span>
-                {disease.id === "ischemia"
-                  ? "Vulnerabilidad isquémica basal"
-                  : disease.id === "infarction"
-                    ? "Extensión del territorio en riesgo"
-                    : disease.id === "heart-failure"
-                      ? "Remodelado y dilatación basal"
-                      : disease.id === "aortic-stenosis"
-                        ? "Remodelado ventricular acumulado"
-                        : disease.id === "mitral-regurgitation"
-                          ? "Remodelado aurículo-ventricular acumulado"
-                        : disease.id === "pericarditis"
-                          ? "Inflamación pericárdica basal"
-                        : disease.id === "hcm"
-                          ? "Remodelado y rigidez diastólica basal"
-                  : disease.id === "afib" ||
-                      disease.id === "vt" ||
-                      disease.id === "av-block"
-                    ? "Impacto hemodinámico inicial"
-                    : "Severidad inicial"}
-              </span>
-              <strong>{Math.round(baseSeverity)}% · {severityLabel(baseSeverity)}</strong>
+              <span>Gravedad del escenario</span>
+              <strong>
+                {Math.round(diseaseSeverity)}% · {severityLabel(diseaseSeverity)}
+              </strong>
             </span>
             <input
               type="range"
               min={0}
               max={100}
               step={1}
-              value={baseSeverity}
-              onChange={(event) => setBaseSeverity(Number(event.target.value))}
-            />
-            <span className="range-ends"><small>Leve</small><small>Severa</small></span>
-          </label>
-
-          <label className="inspector-slider">
-            <span className="inspector-slider-head">
-              <span>{disease.specific.label}</span>
-              <strong>{formatSpecific(disease, specificValue)}</strong>
-            </span>
-            <input
-              type="range"
-              min={disease.specific.min}
-              max={disease.specific.max}
-              step={disease.specific.step}
-              value={specificValue}
-              onChange={(event) => setSpecificValue(Number(event.target.value))}
+              value={diseaseSeverity}
+              onChange={(event) => {
+                setDiseaseSeverity(Number(event.target.value));
+                setClinicalTime(0);
+              }}
             />
             <span className="range-ends">
-              <small>{formatSpecific(disease, disease.specific.min)}</small>
-              <small>{formatSpecific(disease, disease.specific.max)}</small>
+              <small>Leve</small>
+              <small>{disease.specific.label}: {formatSpecific(disease, specificValue)}</small>
+              <small>Grave</small>
             </span>
           </label>
 
           <div className="inspector-result">
             <span>
-              {disease.id === "ischemia"
+              {disease.id === "healthy"
+                ? "Estado de referencia"
+                : disease.id === "ischemia"
                 ? "Carga isquémica simulada"
                 : disease.id === "infarction"
                   ? "Fase electro-mecánica"
@@ -1089,7 +1122,9 @@ export default function CardioLab() {
                   : undefined
               }
             >
-              {disease.id === "infarction"
+              {disease.id === "healthy"
+                ? "Fisiología normal"
+                : disease.id === "infarction"
                 ? simulation.infarction.stageLabel
                 : disease.id === "heart-failure"
                   ? simulation.heartFailure.stageLabel
@@ -1104,7 +1139,9 @@ export default function CardioLab() {
                 : `${Math.round(simulation.severity)}%`}
             </strong>
             <small>
-              {disease.id === "afib"
+              {disease.id === "healthy"
+                ? clinicalDetail(disease, simulation)
+                : disease.id === "afib"
                 ? "impacto basal + tiempo + modificadores; no mide ‘cantidad de fibrilación’"
                 : disease.id === "vt"
                   ? "impacto basal + frecuencia ventricular + tiempo + modificadores"
@@ -1128,12 +1165,63 @@ export default function CardioLab() {
             </small>
           </div>
         </div>
+
+        <div
+          className="condition-explanation"
+          style={{ "--disease-color": disease.color } as CSSProperties}
+          aria-live="polite"
+        >
+          <div className="condition-explanation-heading">
+            <div>
+              <span className="eyebrow">
+                {disease.id === "healthy" ? "Punto de partida" : "Explicación clínica"}
+              </span>
+              <h3>¿En qué consiste {disease.name.toLowerCase()}?</h3>
+              <p>{disease.summary}</p>
+            </div>
+            <div className="clinical-snapshot">
+              <span>Lectura actual</span>
+              <strong>{clinicalStage(disease, simulation)}</strong>
+              <small>{clinicalDetail(disease, simulation)}</small>
+            </div>
+          </div>
+
+          <div className="condition-learning-grid">
+            <article>
+              <span>Movimiento y anatomía</span>
+              <p>{disease.heartLesson}</p>
+            </article>
+            <article>
+              <span>Qué ocurre en el ECG</span>
+              <p>{disease.ecgLesson}</p>
+            </article>
+            <article>
+              <span>Mecanismo principal</span>
+              <p>{disease.causalLesson}</p>
+            </article>
+            <article className="condition-caution">
+              <span>Límite clínico</span>
+              <p>{disease.caveat}</p>
+            </article>
+          </div>
+
+          {disease.id !== "healthy" && simulation.activeRisks.length > 0 && (
+            <div className="active-factors">
+              <strong>Factores activos</strong>
+              <div className="risk-chips">
+                {simulation.activeRisks.map((risk) => (
+                  <span key={risk}>{risk}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       <footer className="app-footer">
         <div>
           <ShieldAlert size={16} />
-          <span>Uso docente. No introducir datos reales de pacientes ni usar para tomar decisiones clínicas.</span>
+          <span>Uso docente: no diagnostica ni sustituye valoración médica. No introduzcas datos reales de pacientes.</span>
         </div>
         <button type="button" onClick={() => setSourcesOpen(true)}>
           Fuentes y límites del modelo

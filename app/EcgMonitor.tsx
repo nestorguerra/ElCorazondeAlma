@@ -21,6 +21,7 @@ type EcgMonitorProps = {
   compareHealthy: boolean;
   motionTelemetry: HeartMotionTelemetry;
   reducedMotion: boolean;
+  theme: "dark" | "light";
 };
 
 type EcgRuntime = {
@@ -30,6 +31,7 @@ type EcgRuntime = {
   compareHealthy: boolean;
   reducedMotion: boolean;
   lead: Lead;
+  theme: "dark" | "light";
 };
 
 function gaussian(x: number, center: number, width: number) {
@@ -195,6 +197,7 @@ export function EcgMonitor({
   compareHealthy,
   motionTelemetry,
   reducedMotion,
+  theme,
 }: EcgMonitorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const timeRef = useRef(0);
@@ -207,6 +210,7 @@ export function EcgMonitor({
     compareHealthy,
     reducedMotion,
     lead,
+    theme,
   });
 
   useEffect(() => {
@@ -217,8 +221,9 @@ export function EcgMonitor({
       compareHealthy,
       reducedMotion,
       lead,
+      theme,
     };
-  }, [compareHealthy, disease, lead, paused, reducedMotion, simulation]);
+  }, [compareHealthy, disease, lead, paused, reducedMotion, simulation, theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -246,14 +251,17 @@ export function EcgMonitor({
     resize();
 
     const secondsVisible = 5;
-    const drawGrid = (amplitude: number) => {
-      context.fillStyle = "#07141b";
+    const drawGrid = (amplitude: number, activeTheme: "dark" | "light") => {
+      const light = activeTheme === "light";
+      context.fillStyle = light ? "#f7fbfb" : "#07141b";
       context.fillRect(0, 0, width, height);
       const horizontalSmallBox = (width / secondsVisible) * 0.04;
       const verticalSmallBox = amplitude * 0.1;
       for (let index = 0, x = 0; x <= width; index += 1, x = index * horizontalSmallBox) {
         const major = index % 5 === 0;
-        context.strokeStyle = major ? "rgba(78, 209, 183, 0.14)" : "rgba(78, 209, 183, 0.055)";
+        context.strokeStyle = major
+          ? light ? "rgba(20, 126, 115, 0.17)" : "rgba(78, 209, 183, 0.14)"
+          : light ? "rgba(20, 126, 115, 0.07)" : "rgba(78, 209, 183, 0.055)";
         context.lineWidth = major ? 1 : 0.6;
         context.beginPath();
         context.moveTo(x + 0.5, 0);
@@ -262,7 +270,9 @@ export function EcgMonitor({
       }
       for (let index = 0, y = 0; y <= height; index += 1, y = index * verticalSmallBox) {
         const major = index % 5 === 0;
-        context.strokeStyle = major ? "rgba(78, 209, 183, 0.14)" : "rgba(78, 209, 183, 0.055)";
+        context.strokeStyle = major
+          ? light ? "rgba(20, 126, 115, 0.17)" : "rgba(78, 209, 183, 0.14)"
+          : light ? "rgba(20, 126, 115, 0.07)" : "rgba(78, 209, 183, 0.055)";
         context.lineWidth = major ? 1 : 0.6;
         context.beginPath();
         context.moveTo(0, y + 0.5);
@@ -288,9 +298,13 @@ export function EcgMonitor({
         if (x === 0) context.moveTo(x, y);
         else context.lineTo(x, y);
       }
-      context.strokeStyle = healthy ? "rgba(162, 182, 192, 0.36)" : "#52e6bc";
+      context.strokeStyle = healthy
+        ? runtime.theme === "light" ? "rgba(75, 98, 108, 0.34)" : "rgba(162, 182, 192, 0.36)"
+        : runtime.theme === "light" ? "#008c78" : "#52e6bc";
       context.lineWidth = healthy ? 1.15 : 2.2;
-      context.shadowColor = healthy ? "transparent" : "rgba(82, 230, 188, 0.58)";
+      context.shadowColor = healthy
+        ? "transparent"
+        : runtime.theme === "light" ? "rgba(0, 140, 120, 0.2)" : "rgba(82, 230, 188, 0.58)";
       context.shadowBlur = healthy ? 0 : 8;
       context.stroke();
       context.shadowBlur = 0;
@@ -319,7 +333,7 @@ export function EcgMonitor({
       }
 
       const amplitude = Math.min(64, height * 0.31);
-      drawGrid(amplitude);
+      drawGrid(amplitude, runtime.theme);
       if (runtime.compareHealthy) drawTrace(true, runtime);
       drawTrace(false, runtime);
 
