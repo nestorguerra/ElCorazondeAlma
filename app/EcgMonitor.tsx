@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getAfibBeat } from "./afibModel";
 import { avBlockEcgValue } from "./avBlockModel";
+import { heartFailureEcgValue } from "./heartFailureModel";
 import type { HeartMotionTelemetry } from "./heartMotion";
 import { ischemiaEcgValue } from "./ischemiaModel";
 import { infarctionEcgValue } from "./infarctionModel";
@@ -145,13 +146,13 @@ function ecgValue(
     return infarctionEcgValue(time, safeRate, lead, simulation.infarction);
   }
 
+  if (pattern === "heart-failure") {
+    return heartFailureEcgValue(time, safeRate, lead);
+  }
+
   let value = baseWave(phase, lead);
 
-  if (pattern === "heart-failure") {
-    value *= 1 - severity01 * 0.18;
-    value += 0.22 * severity01 * gaussian(phase, 0.35, 0.035);
-    value -= 0.22 * severity01 * gaussian(phase, 0.59, 0.075);
-  } else if (pattern === "aortic-stenosis") {
+  if (pattern === "aortic-stenosis") {
     value += 0.78 * severity01 * gaussian(phase, 0.31, 0.012);
     value -= 0.48 * severity01 * gaussian(phase, 0.344, 0.018);
     if (lead === "V5") value -= 0.34 * severity01 * gaussian(phase, 0.59, 0.07);
@@ -391,6 +392,8 @@ export function EcgMonitor({
                     : simulation.infarction.stage === "evolving"
                       ? "Pérdida de R · Q emergente"
                       : "Q patológica / complejo QS"
+                : disease.id === "heart-failure"
+                  ? "Estrecho · sin BRI en este fenotipo"
               : disease.qrsLabel}
           </strong>
         </div>
@@ -419,6 +422,8 @@ export function EcgMonitor({
                     : simulation.infarction.stage === "acute-injury"
                       ? "ST ↑ V2/V5 · DII recíproco"
                       : "ST ↑ persistente · T aún positiva"
+                  : disease.id === "heart-failure"
+                    ? "Cambios inespecíficos · no miden la FE"
                 : disease.stLabel}
           </strong>
         </div>

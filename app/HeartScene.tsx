@@ -691,7 +691,10 @@ function HeartModel({
   const severity = simulation.severity / 100;
   const activeColor = disease.color;
   const region = disease.region;
-  const dilation = disease.id === "heart-failure" ? severity * 0.2 : 0;
+  const dilation =
+    disease.id === "heart-failure"
+      ? simulation.heartFailure.dilationFraction
+      : 0;
   const septalGrowth = disease.id === "hcm" ? severity * 0.35 : 0;
   const atrialGrowth = disease.id === "mitral-regurgitation" ? severity * 0.16 : 0;
   const ischemiaVisibility =
@@ -887,9 +890,9 @@ function HeartModel({
       ventricularAssembly.current?.position.set(0, 0, 0);
       ventricularAssembly.current?.rotation.set(0, 0, 0);
       ventricularAssembly.current?.scale.set(
-        1 + dilation * 0.34,
         1 + dilation * 0.18,
-        1 + dilation * 0.25,
+        1 + dilation * 0.1,
+        1 + dilation * 0.14,
       );
       [conductionLayer.current, atrialAssembly.current, greatVessels.current].forEach(
         (layer) => {
@@ -1022,9 +1025,9 @@ function HeartModel({
       motion.regionalDyskinesia;
 
     if (ventricularAssembly.current) {
-      const dilatedX = 1 + dilation * 0.34;
-      const dilatedY = 1 + dilation * 0.18;
-      const dilatedZ = 1 + dilation * 0.25;
+      const dilatedX = 1 + dilation * 0.18;
+      const dilatedY = 1 + dilation * 0.1;
+      const dilatedZ = 1 + dilation * 0.14;
       ventricularAssembly.current.scale.set(
         dilatedX,
         dilatedY,

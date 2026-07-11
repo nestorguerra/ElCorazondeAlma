@@ -1,4 +1,9 @@
 import {
+  deriveHeartFailureProgression,
+  EMPTY_HEART_FAILURE_PROGRESSION,
+  type HeartFailureProgression,
+} from "./heartFailureModel.ts";
+import {
   deriveInfarctionProgression,
   EMPTY_INFARCTION_PROGRESSION,
   type InfarctionProgression,
@@ -97,6 +102,7 @@ export type DerivedSimulation = {
   coronaryFlowFraction: number;
   supplyDemandImbalance: number;
   infarction: InfarctionProgression;
+  heartFailure: HeartFailureProgression;
   heartRate: number;
   atrialRate: number;
   avBlockStage: AvBlockStage;
@@ -299,34 +305,34 @@ export const DISEASES: Disease[] = [
   {
     id: "heart-failure",
     code: "IC",
-    name: "Insuficiencia cardíaca",
+    name: "Insuficiencia cardíaca · FE reducida",
     family: "Bombeo",
     color: "#55a8ff",
     region: "left-ventricle",
-    regionLabel: "ventrículo izquierdo",
+    regionLabel: "ventrículo izquierdo dilatado",
     pattern: "heart-failure",
     summary:
-      "El ventrículo izquierdo expulsa menos sangre en cada latido.",
+      "Fenotipo dilatado con fracción de eyección reducida: aumenta el volumen ventricular y queda más sangre residual tras cada sístole.",
     heartLesson:
-      "Observa la dilatación, la contracción global débil y el mayor volumen residual.",
+      "Observa una contracción global coordinada pero débil: disminuyen el acortamiento y el engrosamiento sistólico mientras aumentan los volúmenes telediastólico y telesistólico.",
     ecgLesson:
-      "No existe un ECG único de insuficiencia cardíaca: aquí se muestra un ejemplo inespecífico con QRS algo ensanchado.",
+      "Este fenotipo mantiene ritmo sinusal y QRS estrecho, con pobre progresión de R en V2 y cambios laterales inespecíficos. La FE no se puede deducir del ECG.",
     causalLesson:
-      "Más poscarga reduce el volumen sistólico; frecuencias extremas también empeoran el gasto.",
+      "La FE relaciona el volumen expulsado con el volumen telediastólico. Un VI dilatado puede conservar cierto volumen sistólico, pero deja un volumen residual alto y pierde reserva de gasto.",
     caveat:
-      "La fracción de eyección se estima con imagen cardíaca, no a partir de esta tira ECG.",
+      "No existe un ECG diagnóstico de insuficiencia cardíaca. Este preset no incluye fibrilación auricular ni bloqueo de rama; la confirmación exige síntomas o signos, biomarcadores e imagen cardíaca.",
     rhythmLabel: "Sinusal",
-    qrsLabel: "Levemente ancho",
-    stLabel: "Cambios inespecíficos",
-    mechanicalLoss: 0.82,
-    progressionRate: 0.24,
+    qrsLabel: "Estrecho · sin BRI",
+    stLabel: "Repolarización inespecífica",
+    mechanicalLoss: 0,
+    progressionRate: 0,
     timeUnit: "meses",
     specific: {
-      label: "Fracción de eyección",
+      label: "Fracción de eyección del VI",
       min: 15,
-      max: 45,
+      max: 40,
       step: 1,
-      defaultValue: 34,
+      defaultValue: 35,
       unit: "%",
       inverse: true,
     },
@@ -516,6 +522,16 @@ export function deriveSimulation(
     disease.id === "infarction"
       ? deriveInfarctionProgression(specificValue, clinicalTime, baseSeverity)
       : EMPTY_INFARCTION_PROGRESSION;
+  const heartFailure =
+    disease.id === "heart-failure"
+      ? deriveHeartFailureProgression(
+          specificValue,
+          baseSeverity,
+          clinicalTime,
+          clamp(pressureLoad * 0.75 + viscosityLoad * 0.25, 0, 1),
+          vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7,
+        )
+      : EMPTY_HEART_FAILURE_PROGRESSION;
   const demandHeartRate =
     vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7;
   const ratePressureProduct = demandHeartRate * vitals.systolic;
@@ -557,6 +573,13 @@ export function deriveSimulation(
             0,
             1,
           )
+        : disease.id === "heart-failure"
+          ? clamp(
+              heartFailure.globalSystolicLoss * 0.62 +
+                heartFailure.dilationFraction * 0.38,
+              0,
+              1,
+            )
         : genericRiskIndex;
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
@@ -575,9 +598,16 @@ export function deriveSimulation(
                 0,
                 100,
               )
+            : disease.id === "heart-failure"
+              ? clamp(
+                  heartFailure.globalSystolicLoss * 65 +
+                    heartFailure.dilationFraction * 35,
+                  0,
+                  100,
+                )
           : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression =
-    disease.id === "infarction"
+    disease.id === "infarction" || disease.id === "heart-failure"
       ? 0
       : clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
@@ -641,6 +671,9 @@ export function deriveSimulation(
       1,
     );
   }
+  if (disease.id === "heart-failure") {
+    contractility = heartFailure.contractility;
+  }
   if (disease.id === "hcm") {
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
   }
@@ -688,17 +721,20 @@ export function deriveSimulation(
         )
       : 1;
 
-  const strokeVolume = clamp(
-    74 *
-      contractility *
-      afterloadPenalty *
-      fillingPenalty *
-      rhythmPenalty *
-      valvePenalty *
-      regionalPumpPenalty,
-    18,
-    105,
-  );
+  const strokeVolume =
+    disease.id === "heart-failure"
+      ? clamp(heartFailure.strokeVolume, 18, 105)
+      : clamp(
+          74 *
+            contractility *
+            afterloadPenalty *
+            fillingPenalty *
+            rhythmPenalty *
+            valvePenalty *
+            regionalPumpPenalty,
+          18,
+          105,
+        );
   const cardiacOutput = clamp((strokeVolume * heartRate) / 1000, 1.2, 11);
 
   let ejectionFraction = clamp(
@@ -737,11 +773,7 @@ export function deriveSimulation(
     );
   }
   if (disease.id === "heart-failure") {
-    ejectionFraction = clamp(
-      specificValue - progression * 0.18,
-      disease.specific.min,
-      disease.specific.max,
-    );
+    ejectionFraction = heartFailure.ejectionFraction;
   } else if (disease.id === "hcm") {
     ejectionFraction = clamp(67 + severity01 * 6, 62, 78);
   } else if (disease.id === "aortic-stenosis") {
@@ -781,6 +813,10 @@ export function deriveSimulation(
   if (feverLoad > 0.18) activeRisks.push("fiebre / demanda");
   if (hypoxiaLoad > 0.16) activeRisks.push("aporte de O₂ bajo");
   if (viscosityLoad > 0.28) activeRisks.push("resistencia conceptual");
+  if (disease.id === "heart-failure") {
+    activeRisks.push("FE reducida");
+    if (heartFailure.dilationFraction > 0.58) activeRisks.push("VI dilatado");
+  }
   if (disease.id === "infarction" && infarction.occlusiveLoad > 0.55) {
     activeRisks.push("oclusión aguda de la DA");
   }
@@ -791,13 +827,17 @@ export function deriveSimulation(
     currentSystolic < 90 ||
     cardiacOutput < 2.6 ||
     (disease.id === "vt" && severity > 62) ||
-    (disease.id === "infarction" && infarction.regionalDyskinesia > 0.1)
+    (disease.id === "infarction" && infarction.regionalDyskinesia > 0.1) ||
+    (disease.id === "heart-failure" &&
+      heartFailure.stage === "severe-systolic-dysfunction" &&
+      cardiacOutput < 3)
   ) {
     stability = "Inestable";
     stabilityTone = "danger";
   } else if (
     disease.id === "vt" ||
     (disease.id === "infarction" && infarction.wallMotionLoss > 0.72) ||
+    (disease.id === "heart-failure" && heartFailure.ejectionFraction <= 30) ||
     (disease.id === "av-block" && avBlockStage >= 3) ||
     currentSystolic < 102 ||
     cardiacOutput < 3.8 ||
@@ -812,6 +852,7 @@ export function deriveSimulation(
     coronaryFlowFraction,
     supplyDemandImbalance,
     infarction,
+    heartFailure,
     heartRate,
     atrialRate,
     avBlockStage,

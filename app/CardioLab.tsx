@@ -130,6 +130,22 @@ const SOURCES = [
     href: "https://www.heart.org/en/health-topics/heart-failure/diagnosing-heart-failure/ejection-fraction-heart-failure-measurement",
   },
   {
+    label: "Definición Universal 2026 · Fenotipos y causas de insuficiencia cardíaca",
+    href: "https://academic.oup.com/eurheartj/advance-article/doi/10.1093/eurheartj/ehag500/8719720",
+  },
+  {
+    label: "ESC 2021 · Diagnóstico y tratamiento de insuficiencia cardíaca",
+    href: "https://academic.oup.com/eurheartj/article/42/36/3599/6358045",
+  },
+  {
+    label: "AHA/ACC/HFSA 2022 · Guía de insuficiencia cardíaca",
+    href: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001063",
+  },
+  {
+    label: "ASE · Cuantificación de cámaras y volúmenes ventriculares",
+    href: "https://www.asecho.org/wp-content/uploads/2018/08/WFTF-Chamber-Quantification-Summary-Doc-Final-July-18.pdf",
+  },
+  {
     label: "AHA · Estenosis aórtica",
     href: "https://www.heart.org/en/health-topics/heart-valve-problems-and-disease/heart-valve-problems-and-causes/problem-aortic-valve-stenosis",
   },
@@ -227,7 +243,7 @@ const MOTION_FOCUS: Record<DiseaseId, string> = {
   "av-block": "Aurículas regulares · conducción AV según el grado",
   ischemia: "Pared anterolateral: contracción tardía e hipocinética",
   infarction: "Núcleo anterior-apical: hipocinesia → akinesia",
-  "heart-failure": "Ventrículo izquierdo: contracción global débil",
+  "heart-failure": "VI dilatado: acortamiento y engrosamiento global reducidos",
   "aortic-stenosis": "Ventrículo izquierdo: eyección contra resistencia",
   "mitral-regurgitation": "Válvula mitral: flujo retrógrado en sístole",
   pericarditis: "Pericardio: expansión más restringida",
@@ -360,6 +376,15 @@ function CardiacMotionGuide({
           <span>
             Oclusión {Math.round(simulation.infarction.occlusionFraction * 100)}%
             {" · "}Necrosis {Math.round(simulation.infarction.necrosisFraction * 100)}%
+          </span>
+        </span>
+      )}
+      {disease.id === "heart-failure" && !movementPaused && (
+        <span className="rhythm-motion-readout">
+          <span>FE {Math.round(simulation.heartFailure.ejectionFraction)}%</span>
+          <span>
+            VTD {Math.round(simulation.heartFailure.endDiastolicVolume)} · VTS{" "}
+            {Math.round(simulation.heartFailure.endSystolicVolume)} mL
           </span>
         </span>
       )}
@@ -904,6 +929,8 @@ export default function CardioLab() {
                   ? "Vulnerabilidad isquémica basal"
                   : disease.id === "infarction"
                     ? "Extensión del territorio en riesgo"
+                    : disease.id === "heart-failure"
+                      ? "Remodelado y dilatación basal"
                   : disease.id === "afib" ||
                       disease.id === "vt" ||
                       disease.id === "av-block"
@@ -948,15 +975,25 @@ export default function CardioLab() {
                 ? "Carga isquémica simulada"
                 : disease.id === "infarction"
                   ? "Fase electro-mecánica"
+                  : disease.id === "heart-failure"
+                    ? "Estado ventricular"
                 : disease.id === "afib" ||
                     disease.id === "vt" ||
                     disease.id === "av-block"
                   ? "Compromiso hemodinámico simulado"
                   : "Resultado simulado"}
             </span>
-            <strong className={disease.id === "infarction" ? "stage-label" : undefined}>
+            <strong
+              className={
+                disease.id === "infarction" || disease.id === "heart-failure"
+                  ? "stage-label"
+                  : undefined
+              }
+            >
               {disease.id === "infarction"
                 ? simulation.infarction.stageLabel
+                : disease.id === "heart-failure"
+                  ? simulation.heartFailure.stageLabel
                 : `${Math.round(simulation.severity)}%`}
             </strong>
             <small>
@@ -970,6 +1007,8 @@ export default function CardioLab() {
                     ? "reducción de flujo + demanda (FC × presión sistólica) + oxigenación + tiempo"
                     : disease.id === "infarction"
                       ? `oclusión persistente · lesión ${Math.round(simulation.infarction.myocardialInjuryFraction * 100)}% · necrosis ${Math.round(simulation.infarction.necrosisFraction * 100)}%`
+                      : disease.id === "heart-failure"
+                        ? `FE = (VTD − VTS) / VTD · volumen residual ${Math.round(simulation.heartFailure.residualVolumeFraction * 100)}%`
                     : "base + variable propia + tiempo + modificadores"}
             </small>
           </div>
