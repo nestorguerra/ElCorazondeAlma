@@ -681,14 +681,20 @@ export default function CardioLab() {
       setCompareHealthy(scenario.compareHealthy);
       setScenarioMode(scenario.mode);
       setGuidedStep(scenario.guidedStep);
-      setFullscreenSupported(document.fullscreenEnabled);
+      setFullscreenSupported(
+        Boolean(
+          document.fullscreenEnabled &&
+            workspaceRef.current &&
+            typeof workspaceRef.current.requestFullscreen === "function",
+        ),
+      );
       setScenarioHydrated(true);
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 1023px)");
+    const media = window.matchMedia("(max-width: 1180px), (pointer: coarse)");
     const update = () => setCompactViewport(media.matches);
     update();
     media.addEventListener("change", update);
@@ -890,12 +896,23 @@ export default function CardioLab() {
   };
 
   const toggleFullscreen = async () => {
-    if (!document.fullscreenEnabled || !workspaceRef.current) return;
-    if (document.fullscreenElement === workspaceRef.current) {
-      await document.exitFullscreen();
+    if (
+      !document.fullscreenEnabled ||
+      !workspaceRef.current ||
+      typeof workspaceRef.current.requestFullscreen !== "function"
+    ) {
+      setFullscreenSupported(false);
       return;
     }
-    await workspaceRef.current.requestFullscreen();
+    try {
+      if (document.fullscreenElement === workspaceRef.current) {
+        await document.exitFullscreen();
+        return;
+      }
+      await workspaceRef.current.requestFullscreen();
+    } catch {
+      setFullscreenSupported(false);
+    }
   };
 
   const lessonText =
@@ -915,7 +932,12 @@ export default function CardioLab() {
         </div>
 
         <div className="header-actions">
-          <button type="button" className="icon-button text-button" onClick={() => setSourcesOpen(true)}>
+          <button
+            type="button"
+            className="icon-button text-button"
+            onClick={() => setSourcesOpen(true)}
+            aria-label="Base médica"
+          >
             <BookOpen size={17} />
             <span>Base médica</span>
           </button>
@@ -1140,6 +1162,7 @@ export default function CardioLab() {
               healthyDisease={healthyDisease}
               healthySimulation={healthySimulation}
               healthyMotionTelemetry={healthyMotionTelemetry}
+              tabletOptimized={compactViewport}
             />
 
             <CardiacMotionGuide

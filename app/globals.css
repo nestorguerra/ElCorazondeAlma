@@ -3197,3 +3197,112 @@ input[type="range"]::-webkit-slider-thumb {
     flex-direction: column;
   }
 }
+
+/* iPad and touch-tablet hardening — kept last to win over legacy breakpoints */
+@media (max-width: 1180px) {
+  .lab-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .heart-panel,
+  .right-rail,
+  .ecg-module,
+  .heart-viewport,
+  .ecg-canvas-wrap {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .right-rail {
+    display: block;
+  }
+
+  .scenario-control-row {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+    align-items: stretch;
+  }
+
+  .adaptive-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .scenario-actions {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .scenario-actions button,
+  .scenario-mode-switch button,
+  .discrete-control button,
+  .guided-progress button,
+  .guided-navigation button,
+  .lead-switcher button,
+  .mobile-comparison-tabs button,
+  .icon-button {
+    min-height: 44px;
+  }
+
+  .scenario-actions button {
+    min-width: 0;
+    padding-inline: 5px;
+    font-size: 9px;
+    line-height: 1.15;
+  }
+
+  .adaptive-landmarks button {
+    min-height: 42px;
+    padding-block: 5px;
+  }
+
+  input[type="range"] {
+    min-height: 28px;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+  }
+
+  .heart-viewport {
+    min-height: 540px;
+  }
+
+  .ecg-canvas-wrap {
+    height: 300px;
+  }
+
+  .simulation-workspace:fullscreen {
+    padding:
+      max(14px, env(safe-area-inset-top))
+      max(14px, env(safe-area-inset-right))
+      max(14px, env(safe-area-inset-bottom))
+      max(14px, env(safe-area-inset-left));
+  }
+}
+
+@media (max-width: 600px) {
+  .scenario-control-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .scenario-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  button,
+  select,
+  input[type="range"] {
+    touch-action: manipulation;
+  }
+
+  .heart-canvas {
+    touch-action: none;
+  }
+}

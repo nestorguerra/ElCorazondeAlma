@@ -35,6 +35,7 @@ type HeartSceneProps = {
   healthyDisease?: Disease;
   healthySimulation?: DerivedSimulation;
   healthyMotionTelemetry?: HeartMotionTelemetry;
+  tabletOptimized?: boolean;
 };
 
 type HeartModelProps = HeartSceneProps & {
@@ -2078,7 +2079,7 @@ export function HeartScene(props: HeartSceneProps) {
   return (
     <Canvas
       className="heart-canvas"
-      dpr={[1, 1.7]}
+      dpr={props.tabletOptimized ? [1, 1.35] : [1, 1.7]}
       camera={{ position: [0, 0.1, 7.15], fov: 36, near: 0.1, far: 100 }}
       gl={{
         antialias: true,

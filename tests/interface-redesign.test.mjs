@@ -79,3 +79,20 @@ test("ships the simplified professional header, themes and large lower explanati
   assert.match(guidedLesson, /Modifica/);
   assert.match(guidedLesson, /Interpreta/);
 });
+
+test("hardens the full simulator for iPad portrait, landscape and touch", async () => {
+  const [cardioLab, heartScene, styles] = await Promise.all([
+    readFile(new URL("../app/CardioLab.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/HeartScene.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(cardioLab, /max-width: 1180px.*pointer: coarse/);
+  assert.match(cardioLab, /aria-label="Base médica"/);
+  assert.match(cardioLab, /typeof workspaceRef\.current\.requestFullscreen/);
+  assert.match(heartScene, /tabletOptimized \? \[1, 1\.35\] : \[1, 1\.7\]/);
+  assert.match(styles, /iPad and touch-tablet hardening/);
+  assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*?\.lab-grid\s*{\s*grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(styles, /\.scenario-actions button,[\s\S]*?min-height: 44px/);
+  assert.match(styles, /@media \(hover: none\) and \(pointer: coarse\)/);
+});
