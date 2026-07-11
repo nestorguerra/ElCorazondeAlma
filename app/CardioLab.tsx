@@ -146,8 +146,16 @@ const SOURCES = [
     href: "https://www.asecho.org/wp-content/uploads/2018/08/WFTF-Chamber-Quantification-Summary-Doc-Final-July-18.pdf",
   },
   {
-    label: "AHA · Estenosis aórtica",
-    href: "https://www.heart.org/en/health-topics/heart-valve-problems-and-disease/heart-valve-problems-and-causes/problem-aortic-valve-stenosis",
+    label: "ESC/EACTS 2025 · Estenosis aórtica y valvulopatías",
+    href: "https://academic.oup.com/eurheartj/article/46/44/4635/8234488",
+  },
+  {
+    label: "EACVI/ASE · Evaluación ecocardiográfica de la estenosis aórtica",
+    href: "https://www.asecho.org/wp-content/uploads/2025/04/2017ValveStenosisGuideline.pdf",
+  },
+  {
+    label: "EHJ · Respuesta miocárdica a la sobrecarga valvular",
+    href: "https://academic.oup.com/eurheartj/article/44/1/28/6724464",
   },
   {
     label: "AHA · Insuficiencia mitral",
@@ -244,7 +252,7 @@ const MOTION_FOCUS: Record<DiseaseId, string> = {
   ischemia: "Pared anterolateral: contracción tardía e hipocinética",
   infarction: "Núcleo anterior-apical: hipocinesia → akinesia",
   "heart-failure": "VI dilatado: acortamiento y engrosamiento global reducidos",
-  "aortic-stenosis": "Ventrículo izquierdo: eyección contra resistencia",
+  "aortic-stenosis": "Eyección prolongada · VI con hipertrofia concéntrica",
   "mitral-regurgitation": "Válvula mitral: flujo retrógrado en sístole",
   pericarditis: "Pericardio: expansión más restringida",
   hcm: "Septo: engrosamiento y cavidad reducida",
@@ -385,6 +393,18 @@ function CardiacMotionGuide({
           <span>
             VTD {Math.round(simulation.heartFailure.endDiastolicVolume)} · VTS{" "}
             {Math.round(simulation.heartFailure.endSystolicVolume)} mL
+          </span>
+        </span>
+      )}
+      {disease.id === "aortic-stenosis" && !movementPaused && (
+        <span className="rhythm-motion-readout">
+          <span>
+            AVA {simulation.aorticStenosis.valveArea.toFixed(1)} cm² · Vmáx{" "}
+            {simulation.aorticStenosis.peakVelocity.toFixed(1)} m/s
+          </span>
+          <span>
+            Gradiente medio {Math.round(simulation.aorticStenosis.meanGradient)} mmHg
+            {" · "}VI ≈ {Math.round(simulation.aorticStenosis.lvSystolicPressure)} mmHg
           </span>
         </span>
       )}
@@ -931,6 +951,8 @@ export default function CardioLab() {
                     ? "Extensión del territorio en riesgo"
                     : disease.id === "heart-failure"
                       ? "Remodelado y dilatación basal"
+                      : disease.id === "aortic-stenosis"
+                        ? "Remodelado ventricular acumulado"
                   : disease.id === "afib" ||
                       disease.id === "vt" ||
                       disease.id === "av-block"
@@ -977,6 +999,8 @@ export default function CardioLab() {
                   ? "Fase electro-mecánica"
                   : disease.id === "heart-failure"
                     ? "Estado ventricular"
+                    : disease.id === "aortic-stenosis"
+                      ? "Clasificación integrada"
                 : disease.id === "afib" ||
                     disease.id === "vt" ||
                     disease.id === "av-block"
@@ -985,7 +1009,9 @@ export default function CardioLab() {
             </span>
             <strong
               className={
-                disease.id === "infarction" || disease.id === "heart-failure"
+                disease.id === "infarction" ||
+                disease.id === "heart-failure" ||
+                disease.id === "aortic-stenosis"
                   ? "stage-label"
                   : undefined
               }
@@ -994,6 +1020,8 @@ export default function CardioLab() {
                 ? simulation.infarction.stageLabel
                 : disease.id === "heart-failure"
                   ? simulation.heartFailure.stageLabel
+                  : disease.id === "aortic-stenosis"
+                    ? simulation.aorticStenosis.stageLabel
                 : `${Math.round(simulation.severity)}%`}
             </strong>
             <small>
@@ -1009,6 +1037,8 @@ export default function CardioLab() {
                       ? `oclusión persistente · lesión ${Math.round(simulation.infarction.myocardialInjuryFraction * 100)}% · necrosis ${Math.round(simulation.infarction.necrosisFraction * 100)}%`
                       : disease.id === "heart-failure"
                         ? `FE = (VTD − VTS) / VTD · volumen residual ${Math.round(simulation.heartFailure.residualVolumeFraction * 100)}%`
+                      : disease.id === "aortic-stenosis"
+                        ? `AVA ${simulation.aorticStenosis.valveArea.toFixed(1)} cm² · Vmáx ${simulation.aorticStenosis.peakVelocity.toFixed(1)} m/s · gradiente medio ${Math.round(simulation.aorticStenosis.meanGradient)} mmHg · SVi ${Math.round(simulation.aorticStenosis.strokeVolumeIndex)} mL/m² · FE ${Math.round(simulation.aorticStenosis.ejectionFraction)}%`
                     : "base + variable propia + tiempo + modificadores"}
             </small>
           </div>

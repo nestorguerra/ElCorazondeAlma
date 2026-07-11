@@ -1,4 +1,9 @@
 import {
+  deriveAorticStenosisProgression,
+  EMPTY_AORTIC_STENOSIS_PROGRESSION,
+  type AorticStenosisProgression,
+} from "./aorticStenosisModel.ts";
+import {
   deriveHeartFailureProgression,
   EMPTY_HEART_FAILURE_PROGRESSION,
   type HeartFailureProgression,
@@ -103,6 +108,7 @@ export type DerivedSimulation = {
   supplyDemandImbalance: number;
   infarction: InfarctionProgression;
   heartFailure: HeartFailureProgression;
+  aorticStenosis: AorticStenosisProgression;
   heartRate: number;
   atrialRate: number;
   avBlockStage: AvBlockStage;
@@ -347,27 +353,27 @@ export const DISEASES: Disease[] = [
     regionLabel: "válvula aórtica y VI",
     pattern: "aortic-stenosis",
     summary:
-      "La válvula se abre menos y el ventrículo trabaja contra una resistencia mayor.",
+      "La válvula aórtica calcificada abre menos, acelera el chorro sistólico y eleva la presión del ventrículo izquierdo.",
     heartLesson:
-      "Mira el orificio reducido, el chorro estrecho y el engrosamiento progresivo del ventrículo izquierdo.",
+      "Mira la apertura sistólica limitada, el chorro rápido y turbulento, la eyección prolongada y la hipertrofia concéntrica del VI.",
     ecgLesson:
-      "Puede sugerir hipertrofia ventricular izquierda, pero la ecografía es la prueba anatómica clave.",
+      "Busca voltajes de hipertrofia y, si el remodelado es avanzado, descenso del ST e inversión asimétrica de T en V5. Pueden faltar y no gradúan la válvula.",
     causalLesson:
-      "La obstrucción aumenta la poscarga y, con tiempo, favorece hipertrofia y rigidez ventricular.",
+      "La obstrucción aumenta la poscarga valvular; el VI compensa engrosando su pared y suele conservar la FE hasta fases tardías.",
     caveat:
-      "El trazado mostrado es una posibilidad avanzada, no un patrón diagnóstico único.",
+      "Fenotipo calcificado de flujo normal, ritmo sinusal y FE conservada. La gravedad real exige integrar Doppler, área, flujo, presión, anatomía y síntomas.",
     rhythmLabel: "Sinusal",
-    qrsLabel: "Alto voltaje",
-    stLabel: "Patrón de sobrecarga",
-    mechanicalLoss: 0.42,
-    progressionRate: 0.18,
+    qrsLabel: "Voltaje de VI variable",
+    stLabel: "Sobrecarga lateral si hay HVI",
+    mechanicalLoss: 0.08,
+    progressionRate: 0,
     timeUnit: "años",
     specific: {
-      label: "Área valvular conceptual",
-      min: 0.5,
-      max: 3.5,
+      label: "Área valvular efectiva actual",
+      min: 0.7,
+      max: 1.8,
       step: 0.1,
-      defaultValue: 1.3,
+      defaultValue: 1.2,
       unit: "cm²",
       inverse: true,
     },
@@ -532,6 +538,16 @@ export function deriveSimulation(
           vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7,
         )
       : EMPTY_HEART_FAILURE_PROGRESSION;
+  const aorticStenosis =
+    disease.id === "aortic-stenosis"
+      ? deriveAorticStenosisProgression(
+          specificValue,
+          baseSeverity,
+          clinicalTime,
+          vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7,
+          vitals.systolic,
+        )
+      : EMPTY_AORTIC_STENOSIS_PROGRESSION;
   const demandHeartRate =
     vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7;
   const ratePressureProduct = demandHeartRate * vitals.systolic;
@@ -580,6 +596,13 @@ export function deriveSimulation(
               0,
               1,
             )
+          : disease.id === "aortic-stenosis"
+            ? clamp(
+                aorticStenosis.obstructionFraction * 0.56 +
+                  aorticStenosis.concentricHypertrophy * 0.44,
+                0,
+                1,
+              )
         : genericRiskIndex;
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
@@ -605,9 +628,21 @@ export function deriveSimulation(
                   0,
                   100,
                 )
+              : disease.id === "aortic-stenosis"
+                ? clamp(
+                    Math.max(
+                      aorticStenosis.obstructionFraction * 100,
+                      ((aorticStenosis.peakVelocity - 2.5) / 2.5) * 100,
+                      (aorticStenosis.meanGradient / 60) * 100,
+                    ),
+                    0,
+                    100,
+                  )
           : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression =
-    disease.id === "infarction" || disease.id === "heart-failure"
+    disease.id === "infarction" ||
+    disease.id === "heart-failure" ||
+    disease.id === "aortic-stenosis"
       ? 0
       : clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
@@ -674,6 +709,11 @@ export function deriveSimulation(
   if (disease.id === "heart-failure") {
     contractility = heartFailure.contractility;
   }
+  if (disease.id === "aortic-stenosis") {
+    // Radial shortening and LVEF are commonly preserved while longitudinal
+    // mechanics deteriorate under chronic pressure overload.
+    contractility = aorticStenosis.contractility;
+  }
   if (disease.id === "hcm") {
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
   }
@@ -703,9 +743,7 @@ export function deriveSimulation(
             : 0.98
           : 1;
   const valvePenalty =
-    disease.id === "aortic-stenosis"
-      ? 1 - severity01 * 0.28
-      : disease.id === "mitral-regurgitation"
+    disease.id === "mitral-regurgitation"
         ? 1 - severity01 * 0.34
         : disease.id === "hcm"
           ? 1 - severity01 * 0.2
@@ -724,6 +762,8 @@ export function deriveSimulation(
   const strokeVolume =
     disease.id === "heart-failure"
       ? clamp(heartFailure.strokeVolume, 18, 105)
+      : disease.id === "aortic-stenosis"
+        ? clamp(aorticStenosis.strokeVolume, 18, 105)
       : clamp(
           74 *
             contractility *
@@ -774,10 +814,10 @@ export function deriveSimulation(
   }
   if (disease.id === "heart-failure") {
     ejectionFraction = heartFailure.ejectionFraction;
+  } else if (disease.id === "aortic-stenosis") {
+    ejectionFraction = aorticStenosis.ejectionFraction;
   } else if (disease.id === "hcm") {
     ejectionFraction = clamp(67 + severity01 * 6, 62, 78);
-  } else if (disease.id === "aortic-stenosis") {
-    ejectionFraction = clamp(65 - severity01 * 10, 38, 68);
   }
 
   const outputLoss =
@@ -817,6 +857,17 @@ export function deriveSimulation(
     activeRisks.push("FE reducida");
     if (heartFailure.dilationFraction > 0.58) activeRisks.push("VI dilatado");
   }
+  if (disease.id === "aortic-stenosis") {
+    activeRisks.push(
+      aorticStenosis.flowState === "normal" ? "flujo normal" : "flujo bajo",
+    );
+    if (aorticStenosis.meanGradient >= 40) {
+      activeRisks.push("gradiente transvalvular alto");
+    }
+    if (aorticStenosis.concentricHypertrophy > 0.46) {
+      activeRisks.push("hipertrofia concéntrica");
+    }
+  }
   if (disease.id === "infarction" && infarction.occlusiveLoad > 0.55) {
     activeRisks.push("oclusión aguda de la DA");
   }
@@ -853,6 +904,7 @@ export function deriveSimulation(
     supplyDemandImbalance,
     infarction,
     heartFailure,
+    aorticStenosis,
     heartRate,
     atrialRate,
     avBlockStage,

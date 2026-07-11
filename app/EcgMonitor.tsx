@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getAfibBeat } from "./afibModel";
+import { aorticStenosisEcgValue } from "./aorticStenosisModel";
 import { avBlockEcgValue } from "./avBlockModel";
 import { heartFailureEcgValue } from "./heartFailureModel";
 import type { HeartMotionTelemetry } from "./heartMotion";
@@ -150,13 +151,18 @@ function ecgValue(
     return heartFailureEcgValue(time, safeRate, lead);
   }
 
+  if (pattern === "aortic-stenosis") {
+    return aorticStenosisEcgValue(
+      time,
+      safeRate,
+      lead,
+      simulation.aorticStenosis.ecgRemodeling,
+    );
+  }
+
   let value = baseWave(phase, lead);
 
-  if (pattern === "aortic-stenosis") {
-    value += 0.78 * severity01 * gaussian(phase, 0.31, 0.012);
-    value -= 0.48 * severity01 * gaussian(phase, 0.344, 0.018);
-    if (lead === "V5") value -= 0.34 * severity01 * gaussian(phase, 0.59, 0.07);
-  } else if (pattern === "mitral-regurgitation") {
+  if (pattern === "mitral-regurgitation") {
     value += 0.1 * severity01 * gaussian(phase, 0.19, 0.023);
     value += 0.05 * severity01 * plateau(phase, 0.14, 0.2, 0.012);
   } else if (pattern === "pericarditis") {
@@ -394,6 +400,10 @@ export function EcgMonitor({
                       : "Q patológica / complejo QS"
                 : disease.id === "heart-failure"
                   ? "Estrecho · sin BRI en este fenotipo"
+                  : disease.id === "aortic-stenosis"
+                    ? simulation.aorticStenosis.ecgRemodeling >= 0.45
+                      ? "Voltaje de HVI · QRS estrecho"
+                      : "Estrecho · voltaje no diagnóstico"
               : disease.qrsLabel}
           </strong>
         </div>
@@ -424,6 +434,10 @@ export function EcgMonitor({
                       : "ST ↑ persistente · T aún positiva"
                   : disease.id === "heart-failure"
                     ? "Cambios inespecíficos · no miden la FE"
+                    : disease.id === "aortic-stenosis"
+                      ? simulation.aorticStenosis.ecgRemodeling >= 0.5
+                        ? "Sobrecarga lateral en V5"
+                        : "Sin patrón específico obligatorio"
                 : disease.stLabel}
           </strong>
         </div>

@@ -58,10 +58,14 @@ const cyclicPulse = (phase: number, center: number, halfWidth: number) => {
   return smoothStep(0, 1, 1 - wrappedDistance / halfWidth);
 };
 
-export function ventricularActivationAtPhase(phase: number, delay = 0) {
+export function ventricularActivationAtPhase(
+  phase: number,
+  delay = 0,
+  relaxationEnd = 0.64,
+) {
   const localPhase = ((phase % 1) + 1) % 1 - delay;
   const rise = smoothStep(0.025, 0.13, localPhase);
-  const relaxation = 1 - smoothStep(0.42, 0.64, localPhase);
+  const relaxation = 1 - smoothStep(0.42, relaxationEnd, localPhase);
   return rise * relaxation;
 }
 
@@ -105,7 +109,15 @@ export function computeCardiacMotion({
     (ventricularSuppressed ??
       beatIndex % (normalizedSeverity > 0.68 ? 3 : 2) !== 0);
 
-  const coordinatedVentricular = ventricularActivationAtPhase(normalizedPhase);
+  const relaxationEnd =
+    diseaseId === "aortic-stenosis"
+      ? 0.64 + normalizedSeverity * 0.1
+      : 0.64;
+  const coordinatedVentricular = ventricularActivationAtPhase(
+    normalizedPhase,
+    0,
+    relaxationEnd,
+  );
   const ventricular = skipped
     ? 0
     : coordinatedVentricular * clamp(ventricularStrength, 0.7, 1.18);

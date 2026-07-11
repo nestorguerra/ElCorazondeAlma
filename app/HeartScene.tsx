@@ -682,6 +682,7 @@ function HeartModel({
   const greatVessels = useRef<THREE.Group>(null);
   const pericardialLayer = useRef<THREE.Object3D>(null);
   const aorticFlow = useRef<THREE.Group>(null);
+  const aorticValveOrifice = useRef<THREE.Group>(null);
   const backFlow = useRef<THREE.Group>(null);
   const electricPulse = useRef<THREE.Mesh>(null);
   const lesionPatch = useRef<THREE.Mesh>(null);
@@ -694,6 +695,10 @@ function HeartModel({
   const dilation =
     disease.id === "heart-failure"
       ? simulation.heartFailure.dilationFraction
+      : 0;
+  const concentricHypertrophy =
+    disease.id === "aortic-stenosis"
+      ? simulation.aorticStenosis.concentricHypertrophy
       : 0;
   const septalGrowth = disease.id === "hcm" ? severity * 0.35 : 0;
   const atrialGrowth = disease.id === "mitral-regurgitation" ? severity * 0.16 : 0;
@@ -890,9 +895,12 @@ function HeartModel({
       ventricularAssembly.current?.position.set(0, 0, 0);
       ventricularAssembly.current?.rotation.set(0, 0, 0);
       ventricularAssembly.current?.scale.set(
-        1 + dilation * 0.18,
-        1 + dilation * 0.1,
-        1 + dilation * 0.14,
+        1 + dilation * 0.18 + concentricHypertrophy * 0.055,
+        1 + dilation * 0.1 - concentricHypertrophy * 0.018,
+        1 + dilation * 0.14 + concentricHypertrophy * 0.05,
+      );
+      aorticValveOrifice.current?.scale.setScalar(
+        0.34 + simulation.aorticStenosis.valveOpeningFraction * 0.72,
       );
       [conductionLayer.current, atrialAssembly.current, greatVessels.current].forEach(
         (layer) => {
@@ -926,6 +934,9 @@ function HeartModel({
           }
         });
       }
+      aorticFlow.current?.children.forEach((particle) => {
+        particle.visible = false;
+      });
       return;
     }
     if (paused) return;
@@ -1025,9 +1036,12 @@ function HeartModel({
       motion.regionalDyskinesia;
 
     if (ventricularAssembly.current) {
-      const dilatedX = 1 + dilation * 0.18;
-      const dilatedY = 1 + dilation * 0.1;
-      const dilatedZ = 1 + dilation * 0.14;
+      const dilatedX =
+        1 + dilation * 0.18 + concentricHypertrophy * 0.055;
+      const dilatedY =
+        1 + dilation * 0.1 - concentricHypertrophy * 0.018;
+      const dilatedZ =
+        1 + dilation * 0.14 + concentricHypertrophy * 0.05;
       ventricularAssembly.current.scale.set(
         dilatedX,
         dilatedY,
@@ -1190,15 +1204,45 @@ function HeartModel({
 
     if (aorticFlow.current) {
       aorticFlow.current.children.forEach((particle, index) => {
-        particle.visible = ventricularSystole > 0.08;
+        const turbulence = simulation.aorticStenosis.jetTurbulence;
+        const visibleParticles = 8 + Math.round(turbulence * 10);
+        particle.visible =
+          ventricularSystole > 0.08 && index < visibleParticles;
         const progress =
           (state.clock.elapsedTime *
-            (0.14 + simulation.cardiacOutput * 0.026) +
-            index / 12) %
+            (0.16 + simulation.aorticStenosis.peakVelocity * 0.075) +
+            index / 18) %
           1;
         particle.position.copy(aortaCurve.getPointAt(progress));
-        particle.scale.setScalar(0.72 + ventricularSystole * 0.48);
+        if (progress < 0.46) {
+          const decay = 1 - progress / 0.46;
+          const swirl =
+            Math.sin(state.clock.elapsedTime * 17 + index * 2.17) *
+            turbulence *
+            0.075 *
+            decay;
+          particle.position.x += swirl;
+          particle.position.z +=
+            Math.cos(state.clock.elapsedTime * 15 + index * 1.73) *
+            turbulence *
+            0.055 *
+            decay;
+        }
+        particle.scale.setScalar(
+          0.5 + ventricularSystole * 0.36 - turbulence * 0.08,
+        );
+        const material = (particle as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        material.opacity = 0.48 + ventricularSystole * 0.42;
       });
+    }
+
+    if (aorticValveOrifice.current) {
+      const openingScale =
+        0.32 +
+        ventricularSystole *
+          (0.35 + simulation.aorticStenosis.valveOpeningFraction * 0.75);
+      aorticValveOrifice.current.scale.setScalar(openingScale);
     }
 
     if (backFlow.current) {
@@ -1505,19 +1549,56 @@ function HeartModel({
 
       <group ref={greatVessels}>
         {valveAorticActive && (
-          <mesh
-            position={[0.24, 0.93, 0.2]}
-            rotation={[Math.PI / 2, 0.12, 0]}
-          >
-            <torusGeometry
-              args={[0.2 - severity * 0.07, 0.045, 14, 44]}
-            />
-            <meshStandardMaterial
-              color={activeColor}
-              emissive={activeColor}
-              emissiveIntensity={0.9}
-            />
-          </mesh>
+          <>
+            <group
+              ref={aorticValveOrifice}
+              position={[0.24, 0.93, 0.2]}
+              rotation={[Math.PI / 2, 0.12, 0]}
+            >
+              <mesh>
+                <torusGeometry args={[0.2, 0.036, 16, 52]} />
+                <meshStandardMaterial
+                  color={activeColor}
+                  emissive={activeColor}
+                  emissiveIntensity={0.8}
+                  roughness={0.42}
+                />
+              </mesh>
+            </group>
+            <group
+              position={[0.24, 0.93, 0.2]}
+              rotation={[Math.PI / 2, 0.12, 0]}
+            >
+              {Array.from({ length: 9 }).map((_, index) => {
+                const angle = (index / 9) * Math.PI * 2;
+                return (
+                  <mesh
+                    key={index}
+                    position={[
+                      Math.cos(angle) * 0.19,
+                      Math.sin(angle) * 0.19,
+                      0,
+                    ]}
+                    scale={
+                      0.6 +
+                      simulation.aorticStenosis.obstructionFraction * 0.7
+                    }
+                  >
+                    <sphereGeometry args={[0.035, 14, 10]} />
+                    <meshStandardMaterial
+                      color="#ead7a1"
+                      emissive="#a85b24"
+                      emissiveIntensity={
+                        0.14 +
+                        simulation.aorticStenosis.obstructionFraction * 0.34
+                      }
+                      roughness={0.82}
+                    />
+                  </mesh>
+                );
+              })}
+            </group>
+          </>
         )}
 
         {valveMitralActive && (
@@ -1548,9 +1629,9 @@ function HeartModel({
 
       {disease.id === "aortic-stenosis" && (
         <group ref={aorticFlow}>
-          {Array.from({ length: 12 }).map((_, index) => (
+          {Array.from({ length: 18 }).map((_, index) => (
             <mesh key={index}>
-              <sphereGeometry args={[0.033, 16, 12]} />
+              <sphereGeometry args={[0.029, 16, 12]} />
               <meshBasicMaterial
                 color={activeColor}
                 transparent
