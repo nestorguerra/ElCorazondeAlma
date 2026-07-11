@@ -36,6 +36,7 @@ export type CardiacMotion = HeartMotionTelemetry & {
   atrialFlutter: number;
   dyssynchrony: number;
   regionalDysfunction: number;
+  regionalDelay: number;
   twist: number;
 };
 
@@ -85,6 +86,7 @@ export function computeCardiacMotion({
 }: MotionInput): CardiacMotion {
   const normalizedPhase = ((phase % 1) + 1) % 1;
   const normalizedSeverity = clamp(severity);
+  const ischemicBurden = smoothStep(0.18, 0.82, normalizedSeverity);
 
   const skipped =
     diseaseId === "av-block" &&
@@ -141,8 +143,9 @@ export function computeCardiacMotion({
       diseaseId === "infarction"
         ? 0.42 + normalizedSeverity * 0.55
         : diseaseId === "ischemia"
-          ? 0.18 + normalizedSeverity * 0.58
+          ? ischemicBurden * 0.68
           : 0,
+    regionalDelay: diseaseId === "ischemia" ? ischemicBurden * 0.085 : 0,
     twist:
       (0.045 + clamp(contractility, 0.18, 1.08) * 0.095) *
       (diseaseId === "hcm" ? 1.16 : 1),

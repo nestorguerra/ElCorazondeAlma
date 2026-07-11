@@ -88,6 +88,8 @@ export type Vitals = {
 
 export type DerivedSimulation = {
   severity: number;
+  coronaryFlowFraction: number;
+  supplyDemandImbalance: number;
   heartRate: number;
   atrialRate: number;
   avBlockStage: AvBlockStage;
@@ -226,22 +228,22 @@ export const DISEASES: Disease[] = [
     family: "Coronaria",
     color: "#ffb547",
     region: "anterior-lv",
-    regionLabel: "pared anterior del ventrículo izquierdo",
+    regionLabel: "pared anterolateral y apical del ventrículo izquierdo",
     pattern: "ischemia",
     summary:
-      "Una zona recibe menos oxígeno, pero el tejido todavía puede recuperarse.",
+      "Isquemia subendocárdica anterolateral reversible: el aporte coronario no cubre la demanda, sin asumir necrosis.",
     heartLesson:
-      "La zona ámbar pierde movimiento progresivamente cuando la demanda supera al aporte de oxígeno.",
+      "La zona ámbar primero se contrae tarde y después se vuelve hipocinética. No se representa acinesia ni abombamiento paradójico: eso se reserva para lesión más avanzada.",
     ecgLesson:
-      "En este preset, busca descenso del ST e inversión de T en una tira simplificada.",
+      "Ritmo sinusal y QRS estrecho. Al aumentar la carga aparece descenso horizontal-descendente del ST y T simétrica negativa, más marcado en V5 que en V2 y DII.",
     causalLesson:
-      "Frecuencia, fiebre y presión elevadas aumentan la demanda; una SpO₂ baja reduce el aporte sistémico de oxígeno.",
+      "El modelo combina reducción de flujo con demanda miocárdica aproximada por frecuencia × presión sistólica. Fiebre y una SpO₂ baja agravan el desequilibrio.",
     caveat:
-      "La isquemia puede no producir este patrón y una SpO₂ normal no la descarta.",
+      "Este es un escenario docente concreto, no una firma diagnóstica universal: la isquemia puede mostrar otros cambios o incluso un ECG normal. Una SpO₂ normal no la descarta.",
     rhythmLabel: "Sinusal",
     qrsLabel: "Estrecho",
-    stLabel: "ST descendido / T invertida",
-    mechanicalLoss: 0.3,
+    stLabel: "ST ↓ horizontal · T simétrica negativa",
+    mechanicalLoss: 0.12,
     progressionRate: 0.38,
     timeUnit: "min",
     specific: {
@@ -499,12 +501,32 @@ export function deriveSimulation(
   const feverLoad = clamp((vitals.temperature - 37) / 3.5, 0, 1);
   const hypoxiaLoad = clamp((95 - vitals.spo2) / 15, 0, 1);
   const viscosityLoad = clamp((vitals.viscosity - 1) / 0.7, 0, 1);
+  const coronaryFlowFraction =
+    disease.id === "ischemia" || disease.id === "infarction"
+      ? clamp(1 - specificValue / 100, 0.05, 1)
+      : 1;
+  const demandHeartRate =
+    vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7;
+  const ratePressureProduct = demandHeartRate * vitals.systolic;
+  const demandLoad = clamp((ratePressureProduct - 7000) / 15000, 0, 1);
+  const coronaryPressurePenalty = clamp((65 - vitals.diastolic) / 25, 0, 1);
+  const supplyDemandImbalance =
+    disease.id === "ischemia"
+      ? clamp(
+          (1 - coronaryFlowFraction) * 0.68 +
+            demandLoad * 0.22 +
+            hypoxiaLoad * 0.06 +
+            coronaryPressurePenalty * 0.04,
+          0,
+          1,
+        )
+      : 0;
 
   const coronaryWeight =
     disease.id === "ischemia" || disease.id === "infarction" ? 1 : 0.28;
   const chronicWeight =
     disease.timeUnit === "años" || disease.timeUnit === "meses" ? 1 : 0.4;
-  const riskIndex = clamp(
+  const genericRiskIndex = clamp(
     pressureLoad * 0.24 +
       pressureLow * 0.08 +
       ldlLoad * 0.25 * coronaryWeight * chronicWeight +
@@ -514,6 +536,8 @@ export function deriveSimulation(
     0,
     1,
   );
+  const riskIndex =
+    disease.id === "ischemia" ? supplyDemandImbalance : genericRiskIndex;
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
   const startingSeverity =
@@ -521,7 +545,9 @@ export function deriveSimulation(
       ? baseSeverity
       : disease.id === "vt"
         ? clamp(baseSeverity + (specificLoad - 0.45) * 18, 0, 100)
-        : baseSeverity * (0.76 + specificLoad * 0.24);
+        : disease.id === "ischemia"
+          ? clamp(baseSeverity * 0.22 + supplyDemandImbalance * 72, 0, 100)
+          : baseSeverity * (0.76 + specificLoad * 0.24);
   const progression = clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
   const severity01 = severity / 100;
@@ -567,6 +593,11 @@ export function deriveSimulation(
   }
   if (disease.id === "av-block") {
     contractility = avBlockStage === 4 ? 0.88 : 1;
+  }
+  if (disease.id === "ischemia") {
+    // The defect is regional. Avoid translating it into a large global loss of
+    // intrinsic myocardial force while the tissue remains viable.
+    contractility = clamp(1 - severity01 * 0.08, 0.9, 1);
   }
   if (disease.id === "hcm") {
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
@@ -639,6 +670,9 @@ export function deriveSimulation(
       68,
     );
   }
+  if (disease.id === "ischemia") {
+    ejectionFraction = clamp(64 - severity01 * 8 - pressureLoad * 3, 52, 66);
+  }
   if (disease.id === "heart-failure") {
     ejectionFraction = clamp(
       specificValue - progression * 0.18,
@@ -703,6 +737,8 @@ export function deriveSimulation(
 
   return {
     severity,
+    coronaryFlowFraction,
+    supplyDemandImbalance,
     heartRate,
     atrialRate,
     avBlockStage,

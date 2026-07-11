@@ -7,6 +7,7 @@ import {
   type AvBlockStage,
 } from "./avBlockModel";
 import type { HeartMotionTelemetry } from "./heartMotion";
+import { ischemiaEcgValue } from "./ischemiaModel";
 import type { Disease, DerivedSimulation, EcgPattern } from "./simulation";
 import { vtEcgValue, type EcgLead as Lead } from "./vtModel";
 
@@ -39,7 +40,7 @@ function leadModifier(lead: Lead, pattern: EcgPattern) {
     return 0.9;
   }
   if (lead === "V5") {
-    if (pattern === "ischemia" || pattern === "aortic-stenosis" || pattern === "hcm") return 1.22;
+    if (pattern === "aortic-stenosis" || pattern === "hcm") return 1.22;
     return 1.05;
   }
   return 1;
@@ -127,13 +128,13 @@ function ecgValue(
     );
   }
 
+  if (pattern === "ischemia") {
+    return ischemiaEcgValue(time, safeRate, severity01, lead);
+  }
+
   let value = baseWave(phase, lead);
 
-  if (pattern === "ischemia") {
-    const regional = lead === "V5" ? 1.18 : lead === "V2" ? 0.82 : 1;
-    value -= 0.23 * severity01 * regional * plateau(phase, 0.355, 0.5, 0.018);
-    value -= 0.6 * severity01 * regional * gaussian(phase, 0.59, 0.062);
-  } else if (pattern === "infarction") {
+  if (pattern === "infarction") {
     const regional = lead === "V2" ? 1.3 : lead === "V5" ? 1.08 : 0.78;
     value += 0.42 * severity01 * regional * plateau(phase, 0.345, 0.52, 0.019);
     value -= 0.42 * severity01 * regional * gaussian(phase, 0.275, 0.019);

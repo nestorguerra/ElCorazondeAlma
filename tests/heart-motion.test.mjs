@@ -129,7 +129,7 @@ test("deforms the anatomical mesh regionally and keeps surface vessels moving", 
     "utf8",
   );
 
-  assert.match(source, /regional-heart-motion-v3/);
+  assert.match(source, /regional-heart-motion-v4/);
   assert.match(source, /uRegionalDysfunction/);
   assert.match(source, /uAtrialFlutter/);
   assert.match(source, /uDyssynchrony/);

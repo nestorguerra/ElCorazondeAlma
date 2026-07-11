@@ -48,6 +48,7 @@ import {
   getDisease,
   type Disease,
   type DiseaseId,
+  type DerivedSimulation,
   type Vitals,
 } from "./simulation";
 
@@ -79,6 +80,14 @@ const SOURCES = [
   {
     label: "ESC 2021 · Estimulación cardíaca y bloqueo AV",
     href: "https://academic.oup.com/eurheartj/article/42/35/3427/6358547",
+  },
+  {
+    label: "ESC 2023 · Síndromes coronarios agudos y cambios del ST-T",
+    href: "https://academic.oup.com/eurheartj/article/44/38/3720/7243210",
+  },
+  {
+    label: "ASE 2020 · Ecocardiografía de estrés y movimiento regional isquémico",
+    href: "https://www.asecho.org/wp-content/uploads/2020/01/Stress-Echo-2020.pdf",
   },
   {
     label: "Echo Research & Practice · Variación latido a latido en FA",
@@ -200,7 +209,7 @@ const MOTION_FOCUS: Record<DiseaseId, string> = {
   afib: "Sin contracción auricular útil · fuerza ventricular variable",
   vt: "Activación ventricular retardada · aurículas independientes",
   "av-block": "Aurículas regulares · conducción AV según el grado",
-  ischemia: "Pared anterior: contracción debilitada",
+  ischemia: "Pared anterolateral: contracción tardía e hipocinética",
   infarction: "Territorio anterior y apical: movimiento muy reducido",
   "heart-failure": "Ventrículo izquierdo: contracción global débil",
   "aortic-stenosis": "Ventrículo izquierdo: eyección contra resistencia",
@@ -218,11 +227,13 @@ const STAGE_LABELS: Record<CardiacStage, string> = {
 function CardiacMotionGuide({
   telemetry,
   disease,
+  simulation,
   paused,
   reducedMotion,
 }: {
   telemetry: HeartMotionTelemetry;
   disease: Disease;
+  simulation: DerivedSimulation;
   paused: boolean;
   reducedMotion: boolean;
 }) {
@@ -314,6 +325,16 @@ function CardiacMotionGuide({
               : rhythmBeat.avDropped
                 ? "Impulso bloqueado"
                 : "Impulso conducido"}
+          </span>
+        </span>
+      )}
+      {disease.id === "ischemia" && !movementPaused && (
+        <span className="rhythm-motion-readout">
+          <span>
+            Flujo coronario relativo {Math.round(simulation.coronaryFlowFraction * 100)}%
+          </span>
+          <span>
+            Desequilibrio aporte–demanda {Math.round(simulation.supplyDemandImbalance * 100)}%
           </span>
         </span>
       )}
@@ -649,6 +670,7 @@ export default function CardioLab() {
             <CardiacMotionGuide
               telemetry={motionTelemetry}
               disease={disease}
+              simulation={simulation}
               paused={paused}
               reducedMotion={reducedMotion}
             />
@@ -853,9 +875,13 @@ export default function CardioLab() {
           <label className="inspector-slider">
             <span className="inspector-slider-head">
               <span>
-                {disease.id === "afib" || disease.id === "vt" || disease.id === "av-block"
-                  ? "Impacto hemodinámico inicial"
-                  : "Severidad inicial"}
+                {disease.id === "ischemia"
+                  ? "Vulnerabilidad isquémica basal"
+                  : disease.id === "afib" ||
+                      disease.id === "vt" ||
+                      disease.id === "av-block"
+                    ? "Impacto hemodinámico inicial"
+                    : "Severidad inicial"}
               </span>
               <strong>{Math.round(baseSeverity)}% · {severityLabel(baseSeverity)}</strong>
             </span>
@@ -891,9 +917,13 @@ export default function CardioLab() {
 
           <div className="inspector-result">
             <span>
-              {disease.id === "afib" || disease.id === "vt" || disease.id === "av-block"
-                ? "Compromiso hemodinámico simulado"
-                : "Resultado simulado"}
+              {disease.id === "ischemia"
+                ? "Carga isquémica simulada"
+                : disease.id === "afib" ||
+                    disease.id === "vt" ||
+                    disease.id === "av-block"
+                  ? "Compromiso hemodinámico simulado"
+                  : "Resultado simulado"}
             </span>
             <strong>{Math.round(simulation.severity)}%</strong>
             <small>
@@ -903,7 +933,9 @@ export default function CardioLab() {
                   ? "impacto basal + frecuencia ventricular + tiempo + modificadores"
                   : disease.id === "av-block"
                     ? "impacto basal + grado de bloqueo + bradicardia resultante"
-                : "base + variable propia + tiempo + modificadores"}
+                  : disease.id === "ischemia"
+                    ? "reducción de flujo + demanda (FC × presión sistólica) + oxigenación + tiempo"
+                    : "base + variable propia + tiempo + modificadores"}
             </small>
           </div>
         </div>

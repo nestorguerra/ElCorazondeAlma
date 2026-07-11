@@ -39,10 +39,16 @@ type VesselDefinition = {
 
 type NumericUniform = { value: number };
 
+const smoothStep01 = (value: number) => {
+  const progress = Math.min(1, Math.max(0, value));
+  return progress * progress * (3 - 2 * progress);
+};
+
 type HeartMotionUniforms = {
   uTime: NumericUniform;
   uCyclePhase: NumericUniform;
   uVtMode: NumericUniform;
+  uIschemiaMode: NumericUniform;
   uVentricularSystole: NumericUniform;
   uAtrialSystole: NumericUniform;
   uContractility: NumericUniform;
@@ -50,6 +56,7 @@ type HeartMotionUniforms = {
   uAtrialFlutter: NumericUniform;
   uDyssynchrony: NumericUniform;
   uRegionalDysfunction: NumericUniform;
+  uRegionalDelay: NumericUniform;
   uRegionalCenter: { value: THREE.Vector3 };
   uRegionalRadius: NumericUniform;
 };
@@ -59,6 +66,7 @@ function createHeartMotionUniforms(): HeartMotionUniforms {
     uTime: { value: 0 },
     uCyclePhase: { value: 0 },
     uVtMode: { value: 0 },
+    uIschemiaMode: { value: 0 },
     uVentricularSystole: { value: 0 },
     uAtrialSystole: { value: 0 },
     uContractility: { value: 1 },
@@ -66,6 +74,7 @@ function createHeartMotionUniforms(): HeartMotionUniforms {
     uAtrialFlutter: { value: 0 },
     uDyssynchrony: { value: 0 },
     uRegionalDysfunction: { value: 0 },
+    uRegionalDelay: { value: 0 },
     uRegionalCenter: { value: new THREE.Vector3(-0.095, -0.11, -0.187) },
     uRegionalRadius: { value: 0.23 },
   };
@@ -84,6 +93,7 @@ function addRegionalHeartMotion(
 uniform float uTime;
 uniform float uCyclePhase;
 uniform float uVtMode;
+uniform float uIschemiaMode;
 uniform float uVentricularSystole;
 uniform float uAtrialSystole;
 uniform float uContractility;
@@ -91,6 +101,7 @@ uniform float uTwist;
 uniform float uAtrialFlutter;
 uniform float uDyssynchrony;
 uniform float uRegionalDysfunction;
+uniform float uRegionalDelay;
 uniform vec3 uRegionalCenter;
 uniform float uRegionalRadius;`,
       )
@@ -125,6 +136,14 @@ float ventricularActivation = mix(
   localVtPulse,
   uVtMode
 );
+float localIschemicPhase = uCyclePhase - uRegionalDelay * regionalMask;
+float localIschemicPulse = smoothstep(0.025, 0.13, localIschemicPhase) *
+  (1.0 - smoothstep(0.42, 0.64, localIschemicPhase));
+ventricularActivation = mix(
+  ventricularActivation,
+  localIschemicPulse,
+  uIschemiaMode * regionalMask
+);
 float ventricularForce = ventricularActivation * uContractility *
   localContractility * ventricularMask;
 float radialCompression = ventricularForce * (0.052 + apexBias * 0.034);
@@ -156,7 +175,7 @@ transformed.x += activationSide * localVtPulse * uDyssynchrony *
   uVtMode * ventricularMask * 0.008;`,
       );
   };
-  material.customProgramCacheKey = () => "regional-heart-motion-v3";
+  material.customProgramCacheKey = () => "regional-heart-motion-v4";
   material.needsUpdate = true;
 }
 
@@ -626,6 +645,7 @@ function HeartModel({
   const vtFocus = useRef<THREE.Group>(null);
   const escapeFocus = useRef<THREE.Group>(null);
   const coronaryLayer = useRef<THREE.Group>(null);
+  const coronaryPerfusion = useRef<THREE.Group>(null);
   const posteriorCoronaryLayer = useRef<THREE.Group>(null);
   const conductionLayer = useRef<THREE.Group>(null);
   const greatVessels = useRef<THREE.Group>(null);
@@ -643,6 +663,10 @@ function HeartModel({
   const dilation = disease.id === "heart-failure" ? severity * 0.2 : 0;
   const septalGrowth = disease.id === "hcm" ? severity * 0.35 : 0;
   const atrialGrowth = disease.id === "mitral-regurgitation" ? severity * 0.16 : 0;
+  const ischemiaVisibility =
+    disease.id === "ischemia"
+      ? smoothStep01((severity - 0.18) / 0.64)
+      : severity;
 
   const ventActive = [
     "ventricles",
@@ -701,11 +725,14 @@ function HeartModel({
     });
     motionUniforms.current.uContractility.value = simulation.contractility;
     motionUniforms.current.uVtMode.value = disease.id === "vt" ? 1 : 0;
+    motionUniforms.current.uIschemiaMode.value =
+      disease.id === "ischemia" ? 1 : 0;
     motionUniforms.current.uTwist.value = calibration.twist;
     motionUniforms.current.uAtrialFlutter.value = calibration.atrialFlutter;
     motionUniforms.current.uDyssynchrony.value = calibration.dyssynchrony;
     motionUniforms.current.uRegionalDysfunction.value =
       calibration.regionalDysfunction;
+    motionUniforms.current.uRegionalDelay.value = calibration.regionalDelay;
   }, [disease.id, motionTelemetry, severity, simulation.contractility]);
 
   const pericardialAsset = useMemo(() => {
@@ -778,6 +805,10 @@ function HeartModel({
     () => toCurve(CONDUCTION_VESSELS[0].points),
     [],
   );
+  const anteriorCoronaryCurve = useMemo(
+    () => toCurve(CORONARY_VESSELS[0].points),
+    [],
+  );
   const mitralBackflowCurve = useMemo(
     () =>
       toCurve([
@@ -796,6 +827,8 @@ function HeartModel({
       motionUniforms.current.uAtrialFlutter.value = 0;
       motionUniforms.current.uDyssynchrony.value = 0;
       motionUniforms.current.uVtMode.value = 0;
+      motionUniforms.current.uIschemiaMode.value = 0;
+      motionUniforms.current.uRegionalDelay.value = 0;
       Object.assign(motionTelemetry, {
         atrial: 0,
         ventricular: 0,
@@ -825,6 +858,14 @@ function HeartModel({
           layer.scale.set(1, 1, 1);
         },
       );
+      if (coronaryPerfusion.current) {
+        const flow = simulation.coronaryFlowFraction;
+        const visibleParticles = Math.max(2, Math.round(14 * flow));
+        coronaryPerfusion.current.children.forEach((particle, index) => {
+          particle.visible = index < visibleParticles;
+          particle.position.copy(anteriorCoronaryCurve.getPointAt(index / 14));
+        });
+      }
       return;
     }
     if (paused) return;
@@ -903,6 +944,8 @@ function HeartModel({
     motionUniforms.current.uTime.value = state.clock.elapsedTime;
     motionUniforms.current.uCyclePhase.value = motion.phase;
     motionUniforms.current.uVtMode.value = disease.id === "vt" ? 1 : 0;
+    motionUniforms.current.uIschemiaMode.value =
+      disease.id === "ischemia" ? 1 : 0;
     motionUniforms.current.uVentricularSystole.value = ventricularSystole;
     motionUniforms.current.uAtrialSystole.value = atrialSystole;
     motionUniforms.current.uContractility.value = simulation.contractility;
@@ -911,6 +954,7 @@ function HeartModel({
     motionUniforms.current.uDyssynchrony.value = motion.dyssynchrony;
     motionUniforms.current.uRegionalDysfunction.value =
       motion.regionalDysfunction;
+    motionUniforms.current.uRegionalDelay.value = motion.regionalDelay;
 
     if (ventricularAssembly.current) {
       const dilatedX = 1 + dilation * 0.34;
@@ -1033,6 +1077,21 @@ function HeartModel({
         0.085 + severity * 0.03 - remainingWallMotion * 0.065,
       );
       lesionPatch.current.position.y = -0.5 + remainingWallMotion * 0.24;
+    }
+
+    if (coronaryPerfusion.current) {
+      const flow = simulation.coronaryFlowFraction;
+      const visibleParticles = Math.max(2, Math.round(14 * flow));
+      coronaryPerfusion.current.children.forEach((particle, index) => {
+        particle.visible = index < visibleParticles;
+        const progress =
+          (state.clock.elapsedTime * (0.08 + flow * 0.46) + index / 14) % 1;
+        particle.position.copy(anteriorCoronaryCurve.getPointAt(progress));
+        particle.scale.setScalar(0.62 + flow * 0.34);
+        const material = (particle as THREE.Mesh)
+          .material as THREE.MeshBasicMaterial;
+        material.opacity = 0.28 + flow * 0.62;
+      });
     }
 
     if (aorticFlow.current) {
@@ -1175,6 +1234,22 @@ function HeartModel({
               highlight={coronaryActive && index < 7}
             />
           ))}
+          {disease.id === "ischemia" && (
+            <group ref={coronaryPerfusion}>
+              {Array.from({ length: 14 }, (_, index) => (
+                <mesh key={`coronary-perfusion-${index}`}>
+                  <sphereGeometry args={[0.026, 12, 10]} />
+                  <meshBasicMaterial
+                    color="#ffd5a0"
+                    transparent
+                    opacity={0.72}
+                    depthWrite={false}
+                    blending={THREE.AdditiveBlending}
+                  />
+                </mesh>
+              ))}
+            </group>
+          )}
         </group>
 
         <group ref={posteriorCoronaryLayer} position={[0, 0, -0.16]}>
@@ -1226,16 +1301,28 @@ function HeartModel({
               <meshPhysicalMaterial
                 color={activeColor}
                 emissive={activeColor}
-                emissiveIntensity={0.38 + severity * 0.72}
+                emissiveIntensity={
+                  disease.id === "ischemia"
+                    ? 0.16 + ischemiaVisibility * 0.58
+                    : 0.38 + severity * 0.72
+                }
                 transparent
-                opacity={0.24 + severity * 0.46}
+                opacity={
+                  disease.id === "ischemia"
+                    ? 0.04 + ischemiaVisibility * 0.42
+                    : 0.24 + severity * 0.46
+                }
                 roughness={0.76}
                 depthWrite={false}
               />
             </mesh>
             <pointLight
               color={activeColor}
-              intensity={0.7 + severity * 1.8}
+              intensity={
+                disease.id === "ischemia"
+                  ? 0.08 + ischemiaVisibility * 1.1
+                  : 0.7 + severity * 1.8
+              }
               distance={2}
               position={[0.44, -0.5, 1.25]}
             />
