@@ -53,6 +53,7 @@ type HeartMotionUniforms = {
   uCyclePhase: NumericUniform;
   uVtMode: NumericUniform;
   uIschemiaMode: NumericUniform;
+  uInfarctionMode: NumericUniform;
   uVentricularSystole: NumericUniform;
   uAtrialSystole: NumericUniform;
   uContractility: NumericUniform;
@@ -61,6 +62,8 @@ type HeartMotionUniforms = {
   uDyssynchrony: NumericUniform;
   uRegionalDysfunction: NumericUniform;
   uRegionalDelay: NumericUniform;
+  uNecrosisFraction: NumericUniform;
+  uRegionalDyskinesia: NumericUniform;
   uRegionalCenter: { value: THREE.Vector3 };
   uRegionalRadius: NumericUniform;
 };
@@ -71,6 +74,7 @@ function createHeartMotionUniforms(): HeartMotionUniforms {
     uCyclePhase: { value: 0 },
     uVtMode: { value: 0 },
     uIschemiaMode: { value: 0 },
+    uInfarctionMode: { value: 0 },
     uVentricularSystole: { value: 0 },
     uAtrialSystole: { value: 0 },
     uContractility: { value: 1 },
@@ -79,6 +83,8 @@ function createHeartMotionUniforms(): HeartMotionUniforms {
     uDyssynchrony: { value: 0 },
     uRegionalDysfunction: { value: 0 },
     uRegionalDelay: { value: 0 },
+    uNecrosisFraction: { value: 0 },
+    uRegionalDyskinesia: { value: 0 },
     uRegionalCenter: {
       value: new THREE.Vector3(...ANTEROLATERAL_REGION_MODEL),
     },
@@ -100,6 +106,7 @@ uniform float uTime;
 uniform float uCyclePhase;
 uniform float uVtMode;
 uniform float uIschemiaMode;
+uniform float uInfarctionMode;
 uniform float uVentricularSystole;
 uniform float uAtrialSystole;
 uniform float uContractility;
@@ -108,6 +115,8 @@ uniform float uAtrialFlutter;
 uniform float uDyssynchrony;
 uniform float uRegionalDysfunction;
 uniform float uRegionalDelay;
+uniform float uNecrosisFraction;
+uniform float uRegionalDyskinesia;
 uniform vec3 uRegionalCenter;
 uniform float uRegionalRadius;`,
       )
@@ -125,10 +134,26 @@ float regionalMask = 1.0 - smoothstep(
   uRegionalRadius,
   regionalDistance
 );
+float infarctCoreRadius = uRegionalRadius *
+  (0.25 + uNecrosisFraction * 0.5);
+float infarctCoreMask = 1.0 - smoothstep(
+  infarctCoreRadius * 0.68,
+  infarctCoreRadius,
+  regionalDistance
+);
+float infarctBorderMask = max(0.0, regionalMask - infarctCoreMask);
+float regionalLossMask = mix(
+  regionalMask,
+  clamp(infarctCoreMask + infarctBorderMask * 0.55, 0.0, 1.0),
+  uInfarctionMode
+);
 float localContractility = mix(
   1.0,
   1.0 - uRegionalDysfunction,
-  regionalMask
+  regionalLossMask
+);
+vec3 radialDirection = normalize(
+  vec3(position.x, 0.08, position.z) + vec3(0.0001)
 );
 float vtActivationDelay = 0.015 +
   smoothstep(-0.58, 0.64, position.x) *
@@ -155,6 +180,9 @@ float ventricularForce = ventricularActivation * uContractility *
 float radialCompression = ventricularForce * (0.052 + apexBias * 0.034);
 transformed.xz *= 1.0 - radialCompression;
 transformed.y += ventricularForce * (0.012 + apexBias * 0.018);
+float acuteDyskinesia = uInfarctionMode * infarctCoreMask *
+  uRegionalDyskinesia * ventricularActivation;
+transformed += radialDirection * acuteDyskinesia * 0.018;
 
 float twistAngle = uTwist * ventricularForce * (0.67 - heartY);
 float twistCos = cos(twistAngle);
@@ -165,9 +193,6 @@ float atrialForce = uAtrialSystole * uContractility * atrialMask;
 transformed.xz *= 1.0 - atrialForce * 0.082;
 transformed.y -= atrialForce * 0.012;
 
-vec3 radialDirection = normalize(
-  vec3(position.x, 0.08, position.z) + vec3(0.0001)
-);
 float atrialRipple = sin(
   uTime * 39.0 + position.x * 68.0 + position.z * 54.0
 ) + 0.42 * sin(
@@ -181,7 +206,7 @@ transformed.x += activationSide * localVtPulse * uDyssynchrony *
   uVtMode * ventricularMask * 0.008;`,
       );
   };
-  material.customProgramCacheKey = () => "regional-heart-motion-v4";
+  material.customProgramCacheKey = () => "regional-heart-motion-v5";
   material.needsUpdate = true;
 }
 
@@ -673,6 +698,13 @@ function HeartModel({
     disease.id === "ischemia"
       ? smoothStep01((severity - 0.18) / 0.64)
       : severity;
+  const infarctionVisibility =
+    disease.id === "infarction"
+      ? smoothStep01(
+          simulation.infarction.myocardialInjuryFraction * 0.62 +
+            simulation.infarction.necrosisFraction * 0.58,
+        )
+      : 0;
 
   const ventActive = [
     "ventricles",
@@ -728,18 +760,26 @@ function HeartModel({
       diseaseId: disease.id,
       severity,
       contractility: simulation.contractility,
+      infarctionWallMotionLoss: simulation.infarction.wallMotionLoss,
+      infarctionDyskinesia: simulation.infarction.regionalDyskinesia,
     });
     motionUniforms.current.uContractility.value = simulation.contractility;
     motionUniforms.current.uVtMode.value = disease.id === "vt" ? 1 : 0;
     motionUniforms.current.uIschemiaMode.value =
       disease.id === "ischemia" ? 1 : 0;
+    motionUniforms.current.uInfarctionMode.value =
+      disease.id === "infarction" ? 1 : 0;
     motionUniforms.current.uTwist.value = calibration.twist;
     motionUniforms.current.uAtrialFlutter.value = calibration.atrialFlutter;
     motionUniforms.current.uDyssynchrony.value = calibration.dyssynchrony;
     motionUniforms.current.uRegionalDysfunction.value =
       calibration.regionalDysfunction;
     motionUniforms.current.uRegionalDelay.value = calibration.regionalDelay;
-  }, [disease.id, motionTelemetry, severity, simulation.contractility]);
+    motionUniforms.current.uNecrosisFraction.value =
+      simulation.infarction.necrosisFraction;
+    motionUniforms.current.uRegionalDyskinesia.value =
+      calibration.regionalDyskinesia;
+  }, [disease.id, motionTelemetry, severity, simulation]);
 
   const pericardialAsset = useMemo(() => {
     const model = scene.clone(true);
@@ -834,7 +874,9 @@ function HeartModel({
       motionUniforms.current.uDyssynchrony.value = 0;
       motionUniforms.current.uVtMode.value = 0;
       motionUniforms.current.uIschemiaMode.value = 0;
+      motionUniforms.current.uInfarctionMode.value = 0;
       motionUniforms.current.uRegionalDelay.value = 0;
+      motionUniforms.current.uRegionalDyskinesia.value = 0;
       Object.assign(motionTelemetry, {
         atrial: 0,
         ventricular: 0,
@@ -866,10 +908,19 @@ function HeartModel({
       );
       if (coronaryPerfusion.current) {
         const flow = simulation.coronaryFlowFraction;
-        const visibleParticles = Math.max(2, Math.round(14 * flow));
         coronaryPerfusion.current.children.forEach((particle, index) => {
-          particle.visible = index < visibleParticles;
-          particle.position.copy(anteriorCoronaryCurve.getPointAt(index / 14));
+          if (disease.id === "infarction") {
+            particle.visible = index < 8 + Math.round(flow * 6);
+            const progress =
+              index < 8
+                ? (index / 8) * 0.34
+                : 0.34 + ((index - 8) / 6) * 0.66;
+            particle.position.copy(anteriorCoronaryCurve.getPointAt(progress));
+          } else {
+            const visibleParticles = Math.max(2, Math.round(14 * flow));
+            particle.visible = index < visibleParticles;
+            particle.position.copy(anteriorCoronaryCurve.getPointAt(index / 14));
+          }
         });
       }
       return;
@@ -922,6 +973,8 @@ function HeartModel({
       ventricularSuppressed: avRhythm
         ? avRhythm.dropped && !avRhythm.ventricularEscape
         : undefined,
+      infarctionWallMotionLoss: simulation.infarction.wallMotionLoss,
+      infarctionDyskinesia: simulation.infarction.regionalDyskinesia,
     });
     const ventricularSystole = motion.ventricular;
     const atrialSystole = motion.atrial;
@@ -952,6 +1005,8 @@ function HeartModel({
     motionUniforms.current.uVtMode.value = disease.id === "vt" ? 1 : 0;
     motionUniforms.current.uIschemiaMode.value =
       disease.id === "ischemia" ? 1 : 0;
+    motionUniforms.current.uInfarctionMode.value =
+      disease.id === "infarction" ? 1 : 0;
     motionUniforms.current.uVentricularSystole.value = ventricularSystole;
     motionUniforms.current.uAtrialSystole.value = atrialSystole;
     motionUniforms.current.uContractility.value = simulation.contractility;
@@ -961,6 +1016,10 @@ function HeartModel({
     motionUniforms.current.uRegionalDysfunction.value =
       motion.regionalDysfunction;
     motionUniforms.current.uRegionalDelay.value = motion.regionalDelay;
+    motionUniforms.current.uNecrosisFraction.value =
+      simulation.infarction.necrosisFraction;
+    motionUniforms.current.uRegionalDyskinesia.value =
+      motion.regionalDyskinesia;
 
     if (ventricularAssembly.current) {
       const dilatedX = 1 + dilation * 0.34;
@@ -1077,21 +1136,47 @@ function HeartModel({
     if (lesionPatch.current) {
       const remainingWallMotion =
         ventricularSystole * amplitude * (1 - motion.regionalDysfunction);
-      lesionPatch.current.scale.set(
-        0.52 * (1 - remainingWallMotion * 0.72),
-        0.76 * (1 - remainingWallMotion * 0.36),
-        0.085 + severity * 0.03 - remainingWallMotion * 0.065,
-      );
-      lesionPatch.current.position.y = -0.5 + remainingWallMotion * 0.24;
+      if (disease.id === "infarction") {
+        const necrosis = simulation.infarction.necrosisFraction;
+        lesionPatch.current.scale.set(
+          (0.42 + necrosis * 0.14) * (1 - remainingWallMotion * 0.42),
+          (0.62 + simulation.infarction.territoryFraction * 0.18) *
+            (1 - remainingWallMotion * 0.24),
+          0.075 +
+            simulation.infarction.myocardialInjuryFraction * 0.025 +
+            necrosis * 0.035 -
+            remainingWallMotion * 0.035,
+        );
+      } else {
+        lesionPatch.current.scale.set(
+          0.52 * (1 - remainingWallMotion * 0.72),
+          0.76 * (1 - remainingWallMotion * 0.36),
+          0.085 + severity * 0.03 - remainingWallMotion * 0.065,
+        );
+      }
+      lesionPatch.current.position.y =
+        ANTEROLATERAL_REGION_SCENE[1] + remainingWallMotion * 0.24;
     }
 
     if (coronaryPerfusion.current) {
       const flow = simulation.coronaryFlowFraction;
-      const visibleParticles = Math.max(2, Math.round(14 * flow));
       coronaryPerfusion.current.children.forEach((particle, index) => {
-        particle.visible = index < visibleParticles;
-        const progress =
-          (state.clock.elapsedTime * (0.08 + flow * 0.46) + index / 14) % 1;
+        let progress = 0;
+        if (disease.id === "infarction") {
+          const downstreamParticles = Math.round(flow * 6);
+          particle.visible = index < 8 + downstreamParticles;
+          const localProgress =
+            (state.clock.elapsedTime * (0.2 + flow * 0.22) + index / 8) % 1;
+          progress =
+            index < 8
+              ? localProgress * 0.34
+              : 0.34 + localProgress * 0.66;
+        } else {
+          const visibleParticles = Math.max(2, Math.round(14 * flow));
+          particle.visible = index < visibleParticles;
+          progress =
+            (state.clock.elapsedTime * (0.08 + flow * 0.46) + index / 14) % 1;
+        }
         particle.position.copy(anteriorCoronaryCurve.getPointAt(progress));
         particle.scale.setScalar(0.62 + flow * 0.34);
         const material = (particle as THREE.Mesh)
@@ -1240,13 +1325,13 @@ function HeartModel({
               highlight={coronaryActive && index < 7}
             />
           ))}
-          {disease.id === "ischemia" && (
+          {(disease.id === "ischemia" || disease.id === "infarction") && (
             <group ref={coronaryPerfusion}>
               {Array.from({ length: 14 }, (_, index) => (
                 <mesh key={`coronary-perfusion-${index}`}>
                   <sphereGeometry args={[0.026, 12, 10]} />
                   <meshBasicMaterial
-                    color="#ffd5a0"
+                    color={disease.id === "infarction" ? "#ffb0a7" : "#ffd5a0"}
                     transparent
                     opacity={0.72}
                     depthWrite={false}
@@ -1255,6 +1340,22 @@ function HeartModel({
                 </mesh>
               ))}
             </group>
+          )}
+          {disease.id === "infarction" && (
+            <mesh
+              position={CORONARY_VESSELS[0].points[2]}
+              scale={0.72 + simulation.infarction.occlusiveLoad * 0.38}
+            >
+              <sphereGeometry args={[0.064, 22, 16]} />
+              <meshPhysicalMaterial
+                color="#5b0d18"
+                emissive="#ff304a"
+                emissiveIntensity={0.18 + simulation.infarction.occlusiveLoad * 0.28}
+                roughness={0.62}
+                transparent
+                opacity={0.56 + simulation.infarction.occlusiveLoad * 0.32}
+              />
+            </mesh>
           )}
         </group>
 
@@ -1310,13 +1411,13 @@ function HeartModel({
                 emissiveIntensity={
                   disease.id === "ischemia"
                     ? 0.16 + ischemiaVisibility * 0.58
-                    : 0.38 + severity * 0.72
+                    : 0.14 + infarctionVisibility * 0.48
                 }
                 transparent
                 opacity={
                   disease.id === "ischemia"
                     ? 0.04 + ischemiaVisibility * 0.42
-                    : 0.24 + severity * 0.46
+                    : 0.05 + infarctionVisibility * 0.48
                 }
                 roughness={0.76}
                 depthWrite={false}
@@ -1327,7 +1428,7 @@ function HeartModel({
               intensity={
                 disease.id === "ischemia"
                   ? 0.08 + ischemiaVisibility * 1.1
-                  : 0.7 + severity * 1.8
+                  : 0.08 + infarctionVisibility * 0.82
               }
               distance={2}
               position={[0.44, -0.5, 1.25]}

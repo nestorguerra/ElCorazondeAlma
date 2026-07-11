@@ -2,12 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getAfibBeat } from "./afibModel";
-import {
-  avBlockEcgValue,
-  type AvBlockStage,
-} from "./avBlockModel";
+import { avBlockEcgValue } from "./avBlockModel";
 import type { HeartMotionTelemetry } from "./heartMotion";
 import { ischemiaEcgValue } from "./ischemiaModel";
+import { infarctionEcgValue } from "./infarctionModel";
 import type { Disease, DerivedSimulation, EcgPattern } from "./simulation";
 import { vtEcgValue, type EcgLead as Lead } from "./vtModel";
 
@@ -18,6 +16,15 @@ type EcgMonitorProps = {
   compareHealthy: boolean;
   motionTelemetry: HeartMotionTelemetry;
   reducedMotion: boolean;
+};
+
+type EcgRuntime = {
+  disease: Disease;
+  simulation: DerivedSimulation;
+  paused: boolean;
+  compareHealthy: boolean;
+  reducedMotion: boolean;
+  lead: Lead;
 };
 
 function gaussian(x: number, center: number, width: number) {
@@ -35,7 +42,6 @@ function plateau(x: number, start: number, end: number, edge = 0.012) {
 
 function leadModifier(lead: Lead, pattern: EcgPattern) {
   if (lead === "V2") {
-    if (pattern === "infarction") return 1.28;
     if (pattern === "hcm") return 1.16;
     return 0.9;
   }
@@ -93,14 +99,17 @@ export function afibEcgValue(
 function ecgValue(
   time: number,
   pattern: EcgPattern,
-  heartRate: number,
-  atrialRate: number,
-  avBlockStage: AvBlockStage,
-  severity: number,
+  simulation: DerivedSimulation,
   lead: Lead,
   healthy = false,
-  rhythmIrregularity = 0.78,
 ) {
+  const {
+    heartRate,
+    atrialRate,
+    avBlockStage,
+    severity,
+    rhythmIrregularity,
+  } = simulation;
   const severity01 = healthy ? 0 : severity / 100;
   const safeRate = healthy ? 72 : heartRate;
   const period = 60 / Math.max(28, safeRate);
@@ -132,14 +141,13 @@ function ecgValue(
     return ischemiaEcgValue(time, safeRate, severity01, lead);
   }
 
+  if (pattern === "infarction") {
+    return infarctionEcgValue(time, safeRate, lead, simulation.infarction);
+  }
+
   let value = baseWave(phase, lead);
 
-  if (pattern === "infarction") {
-    const regional = lead === "V2" ? 1.3 : lead === "V5" ? 1.08 : 0.78;
-    value += 0.42 * severity01 * regional * plateau(phase, 0.345, 0.52, 0.019);
-    value -= 0.42 * severity01 * regional * gaussian(phase, 0.275, 0.019);
-    value -= 0.25 * severity01 * gaussian(phase, 0.6, 0.072);
-  } else if (pattern === "heart-failure") {
+  if (pattern === "heart-failure") {
     value *= 1 - severity01 * 0.18;
     value += 0.22 * severity01 * gaussian(phase, 0.35, 0.035);
     value -= 0.22 * severity01 * gaussian(phase, 0.59, 0.075);
@@ -175,6 +183,25 @@ export function EcgMonitor({
   const timeRef = useRef(0);
   const lastFrameRef = useRef<number | null>(null);
   const [lead, setLead] = useState<Lead>("DII");
+  const runtimeRef = useRef<EcgRuntime>({
+    disease,
+    simulation,
+    paused,
+    compareHealthy,
+    reducedMotion,
+    lead,
+  });
+
+  useEffect(() => {
+    runtimeRef.current = {
+      disease,
+      simulation,
+      paused,
+      compareHealthy,
+      reducedMotion,
+      lead,
+    };
+  }, [compareHealthy, disease, lead, paused, reducedMotion, simulation]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -227,7 +254,7 @@ export function EcgMonitor({
       }
     };
 
-    const drawTrace = (healthy: boolean) => {
+    const drawTrace = (healthy: boolean, runtime: EcgRuntime) => {
       const baseline = height * 0.53;
       const amplitude = Math.min(64, height * 0.31);
       context.beginPath();
@@ -235,14 +262,10 @@ export function EcgMonitor({
         const sampleTime = timeRef.current - secondsVisible + (x / width) * secondsVisible;
         const sample = ecgValue(
           sampleTime,
-          disease.pattern,
-          simulation.heartRate,
-          simulation.atrialRate,
-          simulation.avBlockStage,
-          simulation.severity,
-          lead,
+          runtime.disease.pattern,
+          runtime.simulation,
+          runtime.lead,
           healthy,
-          simulation.rhythmIrregularity,
         );
         const y = baseline - sample * amplitude;
         if (x === 0) context.moveTo(x, y);
@@ -257,24 +280,31 @@ export function EcgMonitor({
     };
 
     const draw = (timestamp: number) => {
+      const runtime = runtimeRef.current;
       if (lastFrameRef.current === null) lastFrameRef.current = timestamp;
       const delta = Math.min(0.05, (timestamp - lastFrameRef.current) / 1000);
       lastFrameRef.current = timestamp;
-      if (!paused && document.visibilityState === "visible") {
+      if (!runtime.paused && document.visibilityState === "visible") {
         timeRef.current += delta;
-        if ((disease.id === "afib" || disease.id === "vt") && !reducedMotion) {
+        if (
+          (runtime.disease.id === "afib" || runtime.disease.id === "vt") &&
+          !runtime.reducedMotion
+        ) {
           timeRef.current =
             (motionTelemetry.rhythmPosition * 60) /
-            Math.max(28, simulation.heartRate);
-        } else if (disease.id === "av-block" && !reducedMotion) {
+            Math.max(28, runtime.simulation.heartRate);
+        } else if (
+          runtime.disease.id === "av-block" &&
+          !runtime.reducedMotion
+        ) {
           timeRef.current = motionTelemetry.elapsedSeconds;
         }
       }
 
       const amplitude = Math.min(64, height * 0.31);
       drawGrid(amplitude);
-      if (compareHealthy) drawTrace(true);
-      drawTrace(false);
+      if (runtime.compareHealthy) drawTrace(true, runtime);
+      drawTrace(false, runtime);
 
       const scanX = width - 2;
       const glow = context.createLinearGradient(scanX - 24, 0, scanX, 0);
@@ -292,7 +322,7 @@ export function EcgMonitor({
       observer.disconnect();
       lastFrameRef.current = null;
     };
-  }, [compareHealthy, disease, lead, motionTelemetry, paused, reducedMotion, simulation]);
+  }, [motionTelemetry]);
 
   return (
     <div className="ecg-module">
@@ -353,6 +383,14 @@ export function EcgMonitor({
                 : simulation.avBlockStage === 3
                   ? "Conducido · 130 ms"
                   : "Escape · 150 ms"
+              : disease.id === "infarction"
+                ? simulation.infarction.stage === "hyperacute"
+                  ? "R conservada · sin Q patológica"
+                  : simulation.infarction.stage === "acute-injury"
+                    ? "R decreciente · Q incipiente"
+                    : simulation.infarction.stage === "evolving"
+                      ? "Pérdida de R · Q emergente"
+                      : "Q patológica / complejo QS"
               : disease.qrsLabel}
           </strong>
         </div>
@@ -375,6 +413,12 @@ export function EcgMonitor({
                     : simulation.avBlockStage === 3
                       ? "PR fijo 180 ms + bloqueos"
                       : "Sin relación fija"
+                : disease.id === "infarction"
+                  ? simulation.infarction.stage === "hyperacute"
+                    ? "T hiperagudas · J incipiente"
+                    : simulation.infarction.stage === "acute-injury"
+                      ? "ST ↑ V2/V5 · DII recíproco"
+                      : "ST ↑ persistente · T aún positiva"
                 : disease.stLabel}
           </strong>
         </div>

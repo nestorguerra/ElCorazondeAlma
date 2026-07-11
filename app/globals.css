@@ -1352,6 +1352,12 @@ input[type="range"]::-moz-range-thumb {
   font-variant-numeric: tabular-nums;
 }
 
+.inspector-result strong.stage-label {
+  max-width: 180px;
+  font-size: 17px;
+  line-height: 1.08;
+}
+
 .inspector-result small {
   display: block;
   color: var(--text-muted);

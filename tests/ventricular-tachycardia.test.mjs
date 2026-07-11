@@ -77,6 +77,9 @@ test("uses regional delayed activation instead of random whole-heart shaking", a
   assert.match(heartSource, /vtFocus/);
   assert.doesNotMatch(heartSource, /vtShake/);
   assert.match(ecgSource, /vtEcgValue/);
-  assert.match(ecgSource, /disease\.id === "afib" \|\| disease\.id === "vt"/);
+  assert.match(
+    ecgSource,
+    /runtime\.disease\.id === "afib" \|\| runtime\.disease\.id === "vt"/,
+  );
   assert.match(simulationSource, /Monomórfico · ≈160 ms/);
 });

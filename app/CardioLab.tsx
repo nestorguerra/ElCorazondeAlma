@@ -86,6 +86,22 @@ const SOURCES = [
     href: "https://academic.oup.com/eurheartj/article/44/38/3720/7243210",
   },
   {
+    label: "ACC/AHA 2025 · Guía de síndromes coronarios agudos",
+    href: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001309",
+  },
+  {
+    label: "Definición Universal de Infarto · ECG, troponina e imagen",
+    href: "https://academic.oup.com/eurheartj/article/40/3/237/5079081",
+  },
+  {
+    label: "ACC 2022 · Cambios ECG precoces y seriados en el síndrome coronario",
+    href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC10691881/",
+  },
+  {
+    label: "Consenso ECG · Oclusión aguda, reperfusión y evolución del STEMI",
+    href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC6932613/",
+  },
+  {
     label: "ASE 2020 · Ecocardiografía de estrés y movimiento regional isquémico",
     href: "https://www.asecho.org/wp-content/uploads/2020/01/Stress-Echo-2020.pdf",
   },
@@ -210,7 +226,7 @@ const MOTION_FOCUS: Record<DiseaseId, string> = {
   vt: "Activación ventricular retardada · aurículas independientes",
   "av-block": "Aurículas regulares · conducción AV según el grado",
   ischemia: "Pared anterolateral: contracción tardía e hipocinética",
-  infarction: "Territorio anterior y apical: movimiento muy reducido",
+  infarction: "Núcleo anterior-apical: hipocinesia → akinesia",
   "heart-failure": "Ventrículo izquierdo: contracción global débil",
   "aortic-stenosis": "Ventrículo izquierdo: eyección contra resistencia",
   "mitral-regurgitation": "Válvula mitral: flujo retrógrado en sístole",
@@ -335,6 +351,15 @@ function CardiacMotionGuide({
           </span>
           <span>
             Desequilibrio aporte–demanda {Math.round(simulation.supplyDemandImbalance * 100)}%
+          </span>
+        </span>
+      )}
+      {disease.id === "infarction" && !movementPaused && (
+        <span className="rhythm-motion-readout">
+          <span>{simulation.infarction.stageLabel}</span>
+          <span>
+            Oclusión {Math.round(simulation.infarction.occlusionFraction * 100)}%
+            {" · "}Necrosis {Math.round(simulation.infarction.necrosisFraction * 100)}%
           </span>
         </span>
       )}
@@ -877,6 +902,8 @@ export default function CardioLab() {
               <span>
                 {disease.id === "ischemia"
                   ? "Vulnerabilidad isquémica basal"
+                  : disease.id === "infarction"
+                    ? "Extensión del territorio en riesgo"
                   : disease.id === "afib" ||
                       disease.id === "vt" ||
                       disease.id === "av-block"
@@ -919,13 +946,19 @@ export default function CardioLab() {
             <span>
               {disease.id === "ischemia"
                 ? "Carga isquémica simulada"
+                : disease.id === "infarction"
+                  ? "Fase electro-mecánica"
                 : disease.id === "afib" ||
                     disease.id === "vt" ||
                     disease.id === "av-block"
                   ? "Compromiso hemodinámico simulado"
                   : "Resultado simulado"}
             </span>
-            <strong>{Math.round(simulation.severity)}%</strong>
+            <strong className={disease.id === "infarction" ? "stage-label" : undefined}>
+              {disease.id === "infarction"
+                ? simulation.infarction.stageLabel
+                : `${Math.round(simulation.severity)}%`}
+            </strong>
             <small>
               {disease.id === "afib"
                 ? "impacto basal + tiempo + modificadores; no mide ‘cantidad de fibrilación’"
@@ -935,6 +968,8 @@ export default function CardioLab() {
                     ? "impacto basal + grado de bloqueo + bradicardia resultante"
                   : disease.id === "ischemia"
                     ? "reducción de flujo + demanda (FC × presión sistólica) + oxigenación + tiempo"
+                    : disease.id === "infarction"
+                      ? `oclusión persistente · lesión ${Math.round(simulation.infarction.myocardialInjuryFraction * 100)}% · necrosis ${Math.round(simulation.infarction.necrosisFraction * 100)}%`
                     : "base + variable propia + tiempo + modificadores"}
             </small>
           </div>

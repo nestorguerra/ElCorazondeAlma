@@ -30,6 +30,8 @@ type MotionInput = {
   ventricularStrength?: number;
   atrialPhase?: number;
   ventricularSuppressed?: boolean;
+  infarctionWallMotionLoss?: number;
+  infarctionDyskinesia?: number;
 };
 
 export type CardiacMotion = HeartMotionTelemetry & {
@@ -37,6 +39,7 @@ export type CardiacMotion = HeartMotionTelemetry & {
   dyssynchrony: number;
   regionalDysfunction: number;
   regionalDelay: number;
+  regionalDyskinesia: number;
   twist: number;
 };
 
@@ -90,6 +93,8 @@ export function computeCardiacMotion({
   ventricularStrength = 1,
   atrialPhase,
   ventricularSuppressed,
+  infarctionWallMotionLoss,
+  infarctionDyskinesia = 0,
 }: MotionInput): CardiacMotion {
   const normalizedPhase = ((phase % 1) + 1) % 1;
   const normalizedSeverity = clamp(severity);
@@ -145,11 +150,18 @@ export function computeCardiacMotion({
       diseaseId === "vt" ? 0.18 + normalizedSeverity * 0.82 : 0,
     regionalDysfunction:
       diseaseId === "infarction"
-        ? 0.42 + normalizedSeverity * 0.55
+        ? clamp(
+            infarctionWallMotionLoss ??
+              0.42 + normalizedSeverity * 0.55,
+            0,
+            0.98,
+          )
         : diseaseId === "ischemia"
           ? ischemicBurden * 0.68
           : 0,
     regionalDelay: diseaseId === "ischemia" ? ischemicBurden * 0.085 : 0,
+    regionalDyskinesia:
+      diseaseId === "infarction" ? clamp(infarctionDyskinesia, 0, 0.2) : 0,
     twist:
       (0.045 + clamp(contractility, 0.18, 1.08) * 0.095) *
       (diseaseId === "hcm" ? 1.16 : 1),

@@ -1,3 +1,9 @@
+import {
+  deriveInfarctionProgression,
+  EMPTY_INFARCTION_PROGRESSION,
+  type InfarctionProgression,
+} from "./infarctionModel.ts";
+
 type AvBlockStage = 1 | 2 | 3 | 4;
 
 const AV_BLOCK_LABELS: Record<AvBlockStage, string> = {
@@ -90,6 +96,7 @@ export type DerivedSimulation = {
   severity: number;
   coronaryFlowFraction: number;
   supplyDemandImbalance: number;
+  infarction: InfarctionProgression;
   heartRate: number;
   atrialRate: number;
   avBlockStage: AvBlockStage;
@@ -258,34 +265,34 @@ export const DISEASES: Disease[] = [
   {
     id: "infarction",
     code: "IAM",
-    name: "Infarto agudo · STEMI",
+    name: "Infarto anterior agudo · STEMI",
     family: "Coronaria",
     color: "#ff4f66",
     region: "anterior-lv",
     regionLabel: "territorio anterior y apical del VI",
     pattern: "infarction",
     summary:
-      "Una arteria se ocluye y parte del músculo empieza a lesionarse por falta de flujo.",
+      "Oclusión aguda de la descendente anterior con lesión transmural progresiva del territorio anterior y apical.",
     heartLesson:
-      "Sigue el gradiente desde hipoperfusión hasta una pared con contracción muy reducida.",
+      "La alteración mecánica aparece pronto: el borde se vuelve hipocinético y el núcleo anterior-apical progresa hacia akinesia. Sólo el daño transmural muy avanzado produce una discreta disquinesia aguda.",
     ecgLesson:
-      "En este preset educativo aparece elevación regional del ST y una onda Q progresiva.",
+      "La secuencia sin reperfusión comienza con T hiperagudas, evoluciona a elevación del ST en V2 y V5 con descenso recíproco en DII, y después pierde R y desarrolla Q patológica.",
     causalLesson:
-      "El daño aumenta con el tiempo de oclusión; colesterol y presión actúan como factores crónicos, no como interruptores instantáneos.",
+      "La oclusión y el tiempo determinan el daño agudo. La extensión del territorio en riesgo modula la magnitud eléctrica y el impacto sobre la función ventricular.",
     caveat:
-      "No todo infarto eleva el ST. El diagnóstico integra clínica, ECG seriado y biomarcadores como troponina.",
+      "Este preset representa un STEMI anterior por DA persistentemente ocluida y sin reperfusión simulada. No todo infarto eleva el ST; el diagnóstico real exige clínica, ECG seriado, troponina, imagen y angiografía.",
     rhythmLabel: "Sinusal, posible ectopia",
-    qrsLabel: "Q progresiva",
-    stLabel: "ST elevado regional",
-    mechanicalLoss: 0.7,
+    qrsLabel: "Pérdida de R · Q evolutiva",
+    stLabel: "ST ↑ V2/V5 · descenso recíproco DII",
+    mechanicalLoss: 0.28,
     progressionRate: 0.7,
     timeUnit: "min",
     specific: {
-      label: "Oclusión coronaria",
-      min: 30,
+      label: "Oclusión aguda de la DA",
+      min: 90,
       max: 100,
       step: 1,
-      defaultValue: 72,
+      defaultValue: 100,
       unit: "%",
     },
   },
@@ -503,8 +510,12 @@ export function deriveSimulation(
   const viscosityLoad = clamp((vitals.viscosity - 1) / 0.7, 0, 1);
   const coronaryFlowFraction =
     disease.id === "ischemia" || disease.id === "infarction"
-      ? clamp(1 - specificValue / 100, 0.05, 1)
+      ? clamp(1 - specificValue / 100, 0, 1)
       : 1;
+  const infarction =
+    disease.id === "infarction"
+      ? deriveInfarctionProgression(specificValue, clinicalTime, baseSeverity)
+      : EMPTY_INFARCTION_PROGRESSION;
   const demandHeartRate =
     vitals.heartRate + Math.max(0, vitals.temperature - 37) * 7;
   const ratePressureProduct = demandHeartRate * vitals.systolic;
@@ -537,7 +548,16 @@ export function deriveSimulation(
     1,
   );
   const riskIndex =
-    disease.id === "ischemia" ? supplyDemandImbalance : genericRiskIndex;
+    disease.id === "ischemia"
+      ? supplyDemandImbalance
+      : disease.id === "infarction"
+        ? clamp(
+            infarction.occlusiveLoad * 0.7 +
+              infarction.necrosisFraction * 0.3,
+            0,
+            1,
+          )
+        : genericRiskIndex;
   const riskMultiplier = 0.75 + riskIndex * 1.85;
 
   const startingSeverity =
@@ -547,8 +567,19 @@ export function deriveSimulation(
         ? clamp(baseSeverity + (specificLoad - 0.45) * 18, 0, 100)
         : disease.id === "ischemia"
           ? clamp(baseSeverity * 0.22 + supplyDemandImbalance * 72, 0, 100)
+          : disease.id === "infarction"
+            ? clamp(
+                infarction.wallMotionLoss * 72 +
+                  infarction.necrosisFraction * 20 +
+                  baseSeverity * 0.08,
+                0,
+                100,
+              )
           : baseSeverity * (0.76 + specificLoad * 0.24);
-  const progression = clinicalTime * disease.progressionRate * riskMultiplier;
+  const progression =
+    disease.id === "infarction"
+      ? 0
+      : clinicalTime * disease.progressionRate * riskMultiplier;
   const severity = clamp(startingSeverity + progression, 0, 100);
   const severity01 = severity / 100;
   const avBlockStage = toAvBlockStage(
@@ -599,6 +630,17 @@ export function deriveSimulation(
     // intrinsic myocardial force while the tissue remains viable.
     contractility = clamp(1 - severity01 * 0.08, 0.9, 1);
   }
+  if (disease.id === "infarction") {
+    // Large anterior infarction is regional first; global intrinsic force does
+    // not collapse uniformly across the entire ventricular myocardium.
+    contractility = clamp(
+      1 -
+        infarction.wallMotionLoss * 0.16 -
+        infarction.necrosisFraction * 0.08,
+      0.74,
+      1,
+    );
+  }
   if (disease.id === "hcm") {
     contractility = clamp(1.04 - 0.08 * severity01, 0.78, 1.08);
   }
@@ -635,6 +677,16 @@ export function deriveSimulation(
         : disease.id === "hcm"
           ? 1 - severity01 * 0.2
           : 1;
+  const regionalPumpPenalty =
+    disease.id === "infarction"
+      ? clamp(
+          1 -
+            infarction.wallMotionLoss * infarction.territoryFraction * 0.25 -
+            infarction.regionalDyskinesia * 0.16,
+          0.68,
+          1,
+        )
+      : 1;
 
   const strokeVolume = clamp(
     74 *
@@ -642,7 +694,8 @@ export function deriveSimulation(
       afterloadPenalty *
       fillingPenalty *
       rhythmPenalty *
-      valvePenalty,
+      valvePenalty *
+      regionalPumpPenalty,
     18,
     105,
   );
@@ -672,6 +725,16 @@ export function deriveSimulation(
   }
   if (disease.id === "ischemia") {
     ejectionFraction = clamp(64 - severity01 * 8 - pressureLoad * 3, 52, 66);
+  }
+  if (disease.id === "infarction") {
+    ejectionFraction = clamp(
+      64 -
+        infarction.wallMotionLoss * infarction.territoryFraction * 24 -
+        infarction.necrosisFraction * 8 -
+        pressureLoad * 3,
+      30,
+      65,
+    );
   }
   if (disease.id === "heart-failure") {
     ejectionFraction = clamp(
@@ -718,14 +781,23 @@ export function deriveSimulation(
   if (feverLoad > 0.18) activeRisks.push("fiebre / demanda");
   if (hypoxiaLoad > 0.16) activeRisks.push("aporte de O₂ bajo");
   if (viscosityLoad > 0.28) activeRisks.push("resistencia conceptual");
+  if (disease.id === "infarction" && infarction.occlusiveLoad > 0.55) {
+    activeRisks.push("oclusión aguda de la DA");
+  }
 
   let stability: DerivedSimulation["stability"] = "Compensado";
   let stabilityTone: DerivedSimulation["stabilityTone"] = "stable";
-  if (currentSystolic < 90 || cardiacOutput < 2.6 || (disease.id === "vt" && severity > 62)) {
+  if (
+    currentSystolic < 90 ||
+    cardiacOutput < 2.6 ||
+    (disease.id === "vt" && severity > 62) ||
+    (disease.id === "infarction" && infarction.regionalDyskinesia > 0.1)
+  ) {
     stability = "Inestable";
     stabilityTone = "danger";
   } else if (
     disease.id === "vt" ||
+    (disease.id === "infarction" && infarction.wallMotionLoss > 0.72) ||
     (disease.id === "av-block" && avBlockStage >= 3) ||
     currentSystolic < 102 ||
     cardiacOutput < 3.8 ||
@@ -739,6 +811,7 @@ export function deriveSimulation(
     severity,
     coronaryFlowFraction,
     supplyDemandImbalance,
+    infarction,
     heartRate,
     atrialRate,
     avBlockStage,

@@ -129,7 +129,7 @@ test("deforms the anatomical mesh regionally and keeps surface vessels moving", 
     "utf8",
   );
 
-  assert.match(source, /regional-heart-motion-v4/);
+  assert.match(source, /regional-heart-motion-v5/);
   assert.match(source, /uRegionalDysfunction/);
   assert.match(source, /uAtrialFlutter/);
   assert.match(source, /uDyssynchrony/);
@@ -148,8 +148,9 @@ test("renders AF ECG without P waves and with calibrated paper spacing", async (
 
   assert.match(source, /secondsSinceBeat/);
   assert.match(source, /fibrillatoryBaseline/);
-  assert.match(source, /simulation\.rhythmIrregularity/);
-  assert.match(source, /!reducedMotion/);
+  assert.match(source, /rhythmIrregularity/);
+  assert.match(source, /!runtime\.reducedMotion/);
+  assert.match(source, /runtimeRef/);
   assert.match(source, /Ausentes · ondas f/);
   assert.match(source, /horizontalSmallBox.*0\.04/s);
   assert.doesNotMatch(source, /irregularWarp/);
