@@ -2,6 +2,10 @@
 
 Simulador educativo de cardiología para explorar un corazón tridimensional, modificar constantes fisiológicas y observar cómo diez escenarios cardiovasculares cambian el movimiento, la hemodinámica y un ECG sintético en tiempo real.
 
+## Web publicada
+
+[Abrir El Corazón de Alma](https://nestorguerra.github.io/ElCorazondeAlma/)
+
 ## Incluye
 
 - Corazón 3D procedimental con rotación de 360°, zoom, animación mecánica y zonas afectadas resaltadas.

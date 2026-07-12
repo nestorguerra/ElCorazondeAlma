@@ -24,6 +24,26 @@ import {
 } from "./heartRegion";
 import type { Disease, DerivedSimulation } from "./simulation";
 
+declare global {
+  interface Window {
+    __EL_CORAZON_BASE_PATH__?: string;
+  }
+}
+
+function publicAssetPath(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const basePath =
+    typeof window === "undefined"
+      ? ""
+      : (window.__EL_CORAZON_BASE_PATH__ ?? "").replace(/\/$/, "");
+
+  return `${basePath}${normalizedPath}`;
+}
+
+const HEART_MODEL_URL = publicAssetPath(
+  "/models/heart-anatomy-high-detail.glb",
+);
+
 type HeartSceneProps = {
   disease: Disease;
   simulation: DerivedSimulation;
@@ -762,7 +782,7 @@ function HeartModel({
   const nodeActive = region === "av-node";
   const coronaryActive = region === "anterior-lv";
 
-  const { scene } = useGLTF("/models/heart-anatomy-high-detail.glb");
+  const { scene } = useGLTF(HEART_MODEL_URL);
   const motionUniforms = useRef<HeartMotionUniforms>(
     createHeartMotionUniforms(),
   );
@@ -2159,7 +2179,9 @@ export function HeartScene(props: HeartSceneProps) {
   );
 }
 
-useGLTF.preload("/models/heart-anatomy-high-detail.glb");
+if (typeof window !== "undefined") {
+  useGLTF.preload(HEART_MODEL_URL);
+}
 
 function HeartLoadingMark() {
   return (
